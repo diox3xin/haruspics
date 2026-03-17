@@ -1,0 +1,483 @@
+/* ============================================================
+   Inline Image Generation v3.0 — Styles
+   ============================================================ */
+
+/* ---- UTILITY ---- */
+
+.iig-settings .hidden {
+    display: none !important;
+}
+
+.iig-settings .flex-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.iig-settings .flex-row > label {
+    min-width: 140px;
+    font-size: 12px;
+    color: #c4bcbc;
+    flex-shrink: 0;
+}
+
+.iig-settings .flex1 {
+    flex: 1;
+    min-width: 0;
+}
+
+.iig-settings h4 {
+    margin: 12px 0 6px;
+    font-size: 13px;
+    color: #e8e0e0;
+    font-weight: 600;
+}
+
+.iig-settings h5 {
+    margin: 8px 0 4px;
+    font-size: 12px;
+    color: #d0c8c8;
+    font-weight: 600;
+}
+
+.iig-settings hr {
+    border: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    margin: 12px 0;
+}
+
+.iig-settings p.hint {
+    font-size: 10px;
+    color: #7a7272;
+    margin: 2px 0 8px;
+    line-height: 1.4;
+}
+
+.iig-settings .checkbox_label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+    cursor: pointer;
+}
+
+.iig-settings .checkbox_label span {
+    font-size: 12px;
+    color: #c4bcbc;
+}
+
+/* ---- INPUTS & SELECTS ---- */
+
+.iig-settings .text_pole {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    color: #e8e0e0;
+    padding: 6px 10px;
+    font-size: 12px;
+    transition: border-color 0.2s;
+}
+
+.iig-settings .text_pole:focus {
+    border-color: rgba(255, 182, 193, 0.4);
+    outline: none;
+}
+
+.iig-settings .text_pole::placeholder {
+    color: #5a5252;
+}
+
+.iig-settings select {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    color: #e8e0e0;
+    padding: 6px 10px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.iig-settings select:focus {
+    border-color: rgba(255, 182, 193, 0.4);
+    outline: none;
+}
+
+.iig-settings textarea.text_pole {
+    resize: vertical;
+    line-height: 1.5;
+}
+
+/* ---- BUTTONS ---- */
+
+.iig-settings .menu_button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 5px 12px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #c4bcbc;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.iig-settings .menu_button:hover {
+    background: rgba(255, 182, 193, 0.1);
+    border-color: rgba(255, 182, 193, 0.25);
+    color: #ffb6c1;
+}
+
+.iig-settings .menu_button:active {
+    transform: scale(0.97);
+}
+
+.iig-settings .menu_button.disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.iig-refresh-btn {
+    width: 32px;
+    height: 32px;
+    padding: 0 !important;
+    flex-shrink: 0;
+}
+
+.iig-refresh-btn.loading i {
+    animation: iig-spin 0.8s linear infinite;
+}
+
+.iig-key-toggle {
+    width: 32px;
+    height: 32px;
+    padding: 0 !important;
+    flex-shrink: 0;
+}
+
+/* ---- AVATAR DROPDOWN ---- */
+
+.iig-avatar-dropdown {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+}
+
+.iig-avatar-dropdown-selected {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    cursor: pointer;
+    min-height: 38px;
+    transition: border-color 0.2s;
+}
+
+.iig-avatar-dropdown-selected:hover {
+    border-color: rgba(255, 182, 193, 0.3);
+}
+
+.iig-avatar-dropdown.open .iig-avatar-dropdown-selected {
+    border-color: rgba(255, 182, 193, 0.4);
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.iig-dropdown-thumb {
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    object-fit: cover;
+    flex-shrink: 0;
+}
+
+.iig-dropdown-placeholder {
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.03);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.iig-dropdown-placeholder i {
+    color: #5a5252;
+    font-size: 12px;
+}
+
+.iig-dropdown-text {
+    flex: 1;
+    font-size: 12px;
+    color: #c4bcbc;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.iig-dropdown-arrow {
+    font-size: 10px;
+    color: #7a7272;
+    flex-shrink: 0;
+    transition: transform 0.2s;
+}
+
+.iig-avatar-dropdown.open .iig-dropdown-arrow {
+    transform: rotate(180deg);
+}
+
+.iig-avatar-dropdown-list {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    max-height: 240px;
+    overflow-y: auto;
+    background: #1a1a1e;
+    border: 1px solid rgba(255, 182, 193, 0.2);
+    border-top: none;
+    border-bottom-left-radius: 6px;
+    border-bottom-right-radius: 6px;
+    z-index: 100;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.iig-avatar-dropdown.open .iig-avatar-dropdown-list {
+    display: block;
+}
+
+.iig-avatar-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    cursor: pointer;
+    transition: background 0.1s;
+}
+
+.iig-avatar-dropdown-item:hover {
+    background: rgba(255, 182, 193, 0.08);
+}
+
+.iig-avatar-dropdown-item.selected {
+    background: rgba(255, 182, 193, 0.12);
+}
+
+.iig-avatar-dropdown-item .iig-item-thumb {
+    width: 36px;
+    height: 36px;
+    border-radius: 5px;
+    object-fit: cover;
+    flex-shrink: 0;
+}
+
+.iig-avatar-dropdown-item .iig-item-name {
+    font-size: 12px;
+    color: #c4bcbc;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.iig-avatar-dropdown-item.selected .iig-item-name {
+    color: #ffb6c1;
+}
+
+/* scrollbar for dropdown */
+.iig-avatar-dropdown-list::-webkit-scrollbar {
+    width: 5px;
+}
+
+.iig-avatar-dropdown-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.iig-avatar-dropdown-list::-webkit-scrollbar-thumb {
+    background: rgba(255, 182, 193, 0.2);
+    border-radius: 3px;
+}
+
+/* ---- CHARACTER AVATAR PREVIEW ---- */
+
+.iig-avatar-preview {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    overflow: hidden;
+    flex-shrink: 0;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.iig-avatar-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* ---- WARDROBE GRID ---- */
+
+#iig_wardrobe_char,
+#iig_wardrobe_user {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 6px 0;
+}
+
+/* ---- LOADING PLACEHOLDER ---- */
+
+.iig-loading-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 120px;
+    padding: 20px;
+    margin: 8px 0;
+    border-radius: 10px;
+    background: rgba(255, 182, 193, 0.03);
+    border: 1px dashed rgba(255, 182, 193, 0.15);
+}
+
+.iig-spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid rgba(255, 182, 193, 0.15);
+    border-top-color: #ffb6c1;
+    border-radius: 50%;
+    animation: iig-spin 0.8s linear infinite;
+    margin-bottom: 10px;
+}
+
+.iig-status {
+    font-size: 11px;
+    color: #9a9292;
+    text-align: center;
+}
+
+@keyframes iig-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ---- GENERATED IMAGE ---- */
+
+.iig-generated-image {
+    max-width: 100%;
+    border-radius: 10px;
+    margin: 6px 0;
+    cursor: pointer;
+    transition: opacity 0.2s;
+    display: block;
+}
+
+.iig-generated-image:hover {
+    opacity: 0.92;
+}
+
+/* ---- ERROR IMAGE ---- */
+
+.iig-error-image {
+    max-width: 200px;
+    border-radius: 10px;
+    margin: 6px 0;
+    opacity: 0.6;
+    cursor: help;
+}
+
+/* ---- IMAGE WRAPPER (regen button overlay) ---- */
+
+.iig-image-wrapper {
+    position: relative;
+    display: inline-block;
+    max-width: 100%;
+}
+
+.iig-image-wrapper img {
+    display: block;
+    max-width: 100%;
+}
+
+/* ---- REGEN BUTTON ON MESSAGES ---- */
+
+.iig-regenerate-btn {
+    cursor: pointer;
+    opacity: 0.5;
+    transition: opacity 0.15s, color 0.15s;
+}
+
+.iig-regenerate-btn:hover {
+    opacity: 1;
+    color: #ffb6c1;
+}
+
+/* ---- NPC LIST ---- */
+
+#iig_npc_list .menu_button {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    flex-shrink: 0;
+    font-size: 11px;
+}
+
+/* ---- WARDROBE DESCRIPTION PANEL ---- */
+
+[id^="iig_wardrobe_desc_"] textarea {
+    font-size: 11px !important;
+    line-height: 1.5;
+}
+
+[id^="iig_wardrobe_desc_"] .menu_button {
+    font-size: 11px;
+    padding: 4px 10px;
+}
+
+[id^="iig_ward_desc_status_"] {
+    font-size: 10px;
+    padding: 2px 0;
+}
+
+/* ---- SCROLLBAR (general for settings) ---- */
+
+.iig-settings::-webkit-scrollbar {
+    width: 5px;
+}
+
+.iig-settings::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.iig-settings::-webkit-scrollbar-thumb {
+    background: rgba(255, 182, 193, 0.15);
+    border-radius: 3px;
+}
+
+/* ---- RESPONSIVE ---- */
+
+@media (max-width: 600px) {
+    .iig-settings .flex-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .iig-settings .flex-row > label {
+        min-width: unset;
+        margin-bottom: 2px;
+    }
+
+    #iig_wardrobe_char,
+    #iig_wardrobe_user {
+        gap: 6px;
+    }
+}
