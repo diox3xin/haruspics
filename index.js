@@ -698,7 +698,10 @@ async function collectReferenceImages(prompt) {
 
     // Final array: faces first, then clothing images
     const imageRefs = [...faceRefs, ...clothingAsImage];
+    iigLog('INFO', `Reference collection: ${faceRefs.length} face(s), ${clothingAsImage.length} clothing image(s), ${textOnlyClothing.length} clothing text(s), ${warnings.length} warning(s). Total image refs: ${imageRefs.length}/${MAX_IMAGE_REFS}`);
 
+    return { imageRefs, textOnlyClothing, warnings };
+}
 
 // ============================================================
 // IMAGE GENERATION: OpenAI
