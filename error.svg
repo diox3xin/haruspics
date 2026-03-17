@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <rect width="200" height="200" rx="16" fill="#1a1a1e"/>
+  <!-- cat ears -->
+  <path d="M70 75 L60 45 L85 65 Z" fill="#ffb6c1" opacity="0.3"/>
+  <path d="M130 75 L140 45 L115 65 Z" fill="#ffb6c1" opacity="0.3"/>
+  <!-- head -->
+  <circle cx="100" cy="95" r="35" fill="none" stroke="#ffb6c1" stroke-width="2" opacity="0.4"/>
+  <!-- eyes (sad, looking down) -->
+  <path d="M85 90 Q88 95 91 90" fill="none" stroke="#ffb6c1" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+  <path d="M109 90 Q112 95 115 90" fill="none" stroke="#ffb6c1" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+  <!-- mouth (wobbly sad) -->
+  <path d="M92 105 Q100 100 108 105" fill="none" stroke="#ffb6c1" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
+  <!-- tear -->
+  <path d="M88 96 Q87 102 88 106" fill="none" stroke="#99ccff" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
+  <!-- broken image icon below -->
+  <rect x="80" y="138" width="40" height="30" rx="4" fill="none" stroke="#ff6b7f" stroke-width="1.5" stroke-dasharray="4 3" opacity="0.35"/>
+  <line x1="90" y1="148" x2="110" y2="158" stroke="#ff6b7f" stroke-width="1.5" stroke-linecap="round" opacity="0.35"/>
+  <line x1="110" y1="148" x2="90" y2="158" stroke="#ff6b7f" stroke-width="1.5" stroke-linecap="round" opacity="0.35"/>
+  <text x="100" y="186" text-anchor="middle" fill="#5a5252" font-family="sans-serif" font-size="10">oops... generation failed.</text>
+</svg>
