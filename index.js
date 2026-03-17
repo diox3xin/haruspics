@@ -54,29 +54,28 @@ const defaultSettings = Object.freeze({
     maxRetries: 0,
     retryDelay: 1000,
     requestTimeout: 120,
-    // Avatars
     sendCharAvatar: false,
     sendUserAvatar: false,
     userAvatarFile: '',
     autoDetectNames: true,
-    // Style
     defaultStyle: '',
-    // Gemini / nano-banana
     aspectRatio: '1:1',
     imageSize: '1K',
-    // NPC
     npcReferences: [],
-    // Wardrobe
     wardrobeItems: [],
     activeWardrobeChar: null,
     activeWardrobeUser: null,
     injectWardrobeToChat: true,
     wardrobeInjectionDepth: 1,
-    // Vision API for descriptions
     wardrobeDescEndpoint: '',
     wardrobeDescApiKey: '',
     wardrobeDescModel: '',
     wardrobeDescPrompt: 'Describe this clothing outfit in detail for a character in a roleplay. Focus on: type of garment, color, material/texture, style, notable features, accessories. Be concise but thorough (2-4 sentences). Write in English.',
+    // ===== NEW: Presets =====
+    apiPresets: [],
+    activePresetId: null,
+    // ===== NEW: Collapsed sections state =====
+    collapsedSections: {},
 });
 
 // ============================================================
@@ -451,6 +450,103 @@ function updateWardrobeInjection() {
     } catch (error) {
         iigLog('ERROR', 'Error updating wardrobe injection:', error);
     }
+}
+
+// ============================================================
+// API PRESETS SYSTEM
+// ============================================================
+
+const PRESET_FIELDS = [
+    'apiType', 'endpoint', 'apiKey', 'model',
+    'size', 'quality', 'aspectRatio', 'imageSize'
+];
+
+function saveCurrentAsPreset(name) {
+    const settings = getSettings();
+    const preset = {
+        id: 'preset_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        name: name || 'Preset',
+        createdAt: Date.now(),
+    };
+    for (const field of PRESET_FIELDS) {
+        preset[field] = settings[field];
+    }
+    settings.apiPresets.push(preset);
+    settings.activePresetId = preset.id;
+    saveSettings();
+    return preset;
+}
+
+function loadPreset(presetId) {
+    const settings = getSettings();
+    const preset = settings.apiPresets.find(p => p.id === presetId);
+    if (!preset) return false;
+    for (const field of PRESET_FIELDS) {
+        if (Object.hasOwn(preset, field)) {
+            settings[field] = preset[field];
+        }
+    }
+    settings.activePresetId = presetId;
+    saveSettings();
+    return true;
+}
+
+function deletePreset(presetId) {
+    const settings = getSettings();
+    settings.apiPresets = settings.apiPresets.filter(p => p.id !== presetId);
+    if (settings.activePresetId === presetId) settings.activePresetId = null;
+    saveSettings();
+}
+
+function updatePresetFromCurrent(presetId) {
+    const settings = getSettings();
+    const preset = settings.apiPresets.find(p => p.id === presetId);
+    if (!preset) return;
+    for (const field of PRESET_FIELDS) {
+        preset[field] = settings[field];
+    }
+    saveSettings();
+}
+
+function renderPresetSelect() {
+    const settings = getSettings();
+    const select = document.getElementById('iig_preset_select');
+    if (!select) return;
+    const currentVal = settings.activePresetId || '';
+    select.innerHTML = '<option value="">-- без пресета --</option>';
+    for (const p of settings.apiPresets) {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.name;
+        opt.selected = p.id === currentVal;
+        select.appendChild(opt);
+    }
+}
+
+// ============================================================
+// COLLAPSIBLE SECTIONS
+// ============================================================
+
+function initCollapsibleSections() {
+    const settings = getSettings();
+    document.querySelectorAll('.iig-collapsible-header').forEach(header => {
+        const section = header.closest('.iig-collapsible');
+        if (!section) return;
+        const sectionId = section.dataset.sectionId;
+
+        // Restore saved state
+        if (sectionId && settings.collapsedSections[sectionId]) {
+            section.classList.add('collapsed');
+        }
+
+        header.addEventListener('click', () => {
+            section.classList.toggle('collapsed');
+            if (sectionId) {
+                settings.collapsedSections[sectionId] = section.classList.contains('collapsed');
+                saveSettings();
+            }
+        });
+    });
 }
 
 // ============================================================
@@ -1896,217 +1992,287 @@ function createSettingsUI() {
     if (!container) return;
 
     const html = `
-        <div class="inline-drawer">
-            <div class="inline-drawer-toggle inline-drawer-header">
-                <b>Генерация картинок v3</b>
-                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-            </div>
-            <div class="inline-drawer-content">
-                <div class="iig-settings">
-                    <label class="checkbox_label">
+        <div class="iig-settings" id="iig_settings_root">
+            <div class="inline-drawer">
+                <div class="inline-drawer-toggle inline-drawer-header">
+                    <b>🎨 Inline Image Generation v3.0</b>
+                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+                </div>
+                <div class="inline-drawer-content">
+
+                    <!-- Enable toggle -->
+                    <label class="checkbox_label" style="margin-bottom:10px;">
                         <input type="checkbox" id="iig_enabled" ${settings.enabled ? 'checked' : ''}>
                         <span>Включить генерацию картинок</span>
                     </label>
 
-                    <hr>
-                    <h4>Настройки API</h4>
-
-                    <div class="flex-row">
-                        <label for="iig_api_type">Тип API</label>
-                        <select id="iig_api_type" class="flex1">
-                            <option value="openai" ${settings.apiType === 'openai' ? 'selected' : ''}>OpenAI-совместимый</option>
-                            <option value="gemini" ${settings.apiType === 'gemini' ? 'selected' : ''}>Gemini-совместимый (nano-banana)</option>
-                        </select>
-                    </div>
-
-                    <div class="flex-row">
-                        <label for="iig_endpoint">URL эндпоинта</label>
-                        <input type="text" id="iig_endpoint" class="text_pole flex1" value="${settings.endpoint}" placeholder="https://api.example.com">
-                    </div>
-
-                    <div class="flex-row">
-                        <label for="iig_api_key">API ключ</label>
-                        <input type="password" id="iig_api_key" class="text_pole flex1" value="${settings.apiKey}">
-                        <div id="iig_key_toggle" class="menu_button iig-key-toggle" title="Показать/Скрыть"><i class="fa-solid fa-eye"></i></div>
-                    </div>
-
-                    <div class="flex-row">
-                        <label for="iig_model">Модель</label>
-                        <select id="iig_model" class="flex1">
-                            ${settings.model ? `<option value="${settings.model}" selected>${settings.model}</option>` : '<option value="">-- Выберите модель --</option>'}
-                        </select>
-                        <div id="iig_refresh_models" class="menu_button iig-refresh-btn" title="Обновить список"><i class="fa-solid fa-sync"></i></div>
-                    </div>
-
-                    <hr>
-                    <h4>Параметры генерации</h4>
-
-                    <div class="flex-row">
-                        <label for="iig_size">Размер (OpenAI)</label>
-                        <select id="iig_size" class="flex1">
-                            <option value="1024x1024" ${settings.size === '1024x1024' ? 'selected' : ''}>1024x1024</option>
-                            <option value="1792x1024" ${settings.size === '1792x1024' ? 'selected' : ''}>1792x1024</option>
-                            <option value="1024x1792" ${settings.size === '1024x1792' ? 'selected' : ''}>1024x1792</option>
-                            <option value="512x512" ${settings.size === '512x512' ? 'selected' : ''}>512x512</option>
-                        </select>
-                    </div>
-
-                    <div class="flex-row">
-                        <label for="iig_quality">Качество</label>
-                        <select id="iig_quality" class="flex1">
-                            <option value="standard" ${settings.quality === 'standard' ? 'selected' : ''}>Стандартное</option>
-                            <option value="hd" ${settings.quality === 'hd' ? 'selected' : ''}>HD</option>
-                        </select>
-                    </div>
-
-                    <div id="iig_gemini_section" class="${settings.apiType !== 'gemini' ? 'hidden' : ''}">
-                        <div class="flex-row">
-                            <label for="iig_aspect_ratio">Соотношение сторон</label>
-                            <select id="iig_aspect_ratio" class="flex1">
-                                ${VALID_ASPECT_RATIOS.map(r => `<option value="${r}" ${settings.aspectRatio === r ? 'selected' : ''}>${r}</option>`).join('')}
-                            </select>
+                    <!-- ======= SECTION: API ======= -->
+                    <div class="iig-collapsible" data-section-id="api">
+                        <div class="iig-collapsible-header">
+                            <i class="fa-solid fa-chevron-down iig-collapse-icon"></i>
+                            <span>🔌 API и модель</span>
                         </div>
-                        <div class="flex-row">
-                            <label for="iig_image_size">Разрешение</label>
-                            <select id="iig_image_size" class="flex1">
-                                ${VALID_IMAGE_SIZES.map(s => `<option value="${s}" ${settings.imageSize === s ? 'selected' : ''}>${s}</option>`).join('')}
-                            </select>
-                        </div>
-                    </div>
+                        <div class="iig-collapsible-content">
 
-                    <hr>
-                    <h4>Стиль и референсы</h4>
-
-                    <div class="flex-row">
-                        <label for="iig_default_style">Стиль по умолчанию</label>
-                        <textarea id="iig_default_style" class="text_pole flex1" rows="2" placeholder="semi_realistic, manhwa style, soft lighting...">${settings.defaultStyle || ''}</textarea>
-                    </div>
-                    <p class="hint">Добавляется к каждому промпту генерации.</p>
-
-                    <label class="checkbox_label">
-                        <input type="checkbox" id="iig_auto_detect_names" ${settings.autoDetectNames ? 'checked' : ''}>
-                        <span>Автоопределение имён в промпте</span>
-                    </label>
-                    <p class="hint">Если имя персонажа/юзера/NPC в промпте, аватарка автоматически отправится как референс.</p>
-
-                    <h5>Аватар персонажа</h5>
-                    <div class="flex-row" style="align-items:center;gap:8px;">
-                        <label class="checkbox_label" style="flex:1;margin:0;">
-                            <input type="checkbox" id="iig_send_char_avatar" ${settings.sendCharAvatar ? 'checked' : ''}>
-                            <span>Всегда отправлять аватар персонажа</span>
-                        </label>
-                        <div id="iig-char-avatar-preview" class="iig-avatar-preview" style="display:none;">
-                            <img src="" alt="char" />
-                        </div>
-                    </div>
-
-                    <h5>Аватар юзера</h5>
-                    <label class="checkbox_label">
-                        <input type="checkbox" id="iig_send_user_avatar" ${settings.sendUserAvatar ? 'checked' : ''}>
-                        <span>Всегда отправлять аватар юзера</span>
-                    </label>
-
-                    <div id="iig_user_avatar_row" class="flex-row ${!settings.sendUserAvatar ? 'hidden' : ''}" style="margin-top:5px;align-items:center;">
-                        <label>Файл аватара</label>
-                        <div id="iig_avatar_dropdown" class="iig-avatar-dropdown">
-                            <div id="iig_avatar_dropdown_selected" class="iig-avatar-dropdown-selected">
-                                ${settings.userAvatarFile
-            ? `<img class="iig-dropdown-thumb" src="/User Avatars/${encodeURIComponent(settings.userAvatarFile)}" alt="" onerror="this.style.display='none'">`
-            : '<div class="iig-dropdown-placeholder"><i class="fa-solid fa-user"></i></div>'}
-                                <span class="iig-dropdown-text">${settings.userAvatarFile || '-- Не выбран --'}</span>
-                                <span class="iig-dropdown-arrow fa-solid fa-chevron-down"></span>
+                            <!-- Presets -->
+                            <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+                                <label style="font-size:11px;color:#9a9292;flex-shrink:0;">Пресет:</label>
+                                <select id="iig_preset_select" class="flex1" style="font-size:11px;"></select>
+                                <div class="menu_button" id="iig_preset_save" title="Сохранить текущие настройки как новый пресет"><i class="fa-solid fa-floppy-disk"></i></div>
+                                <div class="menu_button" id="iig_preset_update" title="Обновить выбранный пресет текущими настройками"><i class="fa-solid fa-arrows-rotate"></i></div>
+                                <div class="menu_button" id="iig_preset_delete" title="Удалить выбранный пресет" style="color:#cc5555;"><i class="fa-solid fa-trash"></i></div>
                             </div>
-                            <div id="iig_avatar_dropdown_list" class="iig-avatar-dropdown-list"></div>
+
+                            <div class="flex-row">
+                                <label>Тип API</label>
+                                <select id="iig_api_type" class="flex1">
+                                    <option value="openai" ${settings.apiType === 'openai' ? 'selected' : ''}>OpenAI-совместимый</option>
+                                    <option value="gemini" ${settings.apiType === 'gemini' ? 'selected' : ''}>Gemini (nano-banana)</option>
+                                </select>
+                            </div>
+
+                            <div class="flex-row">
+                                <label>Эндпоинт</label>
+                                <input type="text" id="iig_endpoint" class="text_pole flex1" value="${settings.endpoint || ''}" placeholder="https://api.openai.com">
+                            </div>
+
+                            <div class="flex-row">
+                                <label>API ключ</label>
+                                <input type="password" id="iig_api_key" class="text_pole flex1" value="${settings.apiKey || ''}" placeholder="sk-...">
+                                <div class="menu_button iig-key-toggle" id="iig_key_toggle"><i class="fa-solid fa-eye"></i></div>
+                            </div>
+
+                            <div class="flex-row">
+                                <label>Модель</label>
+                                <select id="iig_model" class="flex1">
+                                    ${settings.model ? `<option value="${settings.model}" selected>${settings.model}</option>` : '<option value="">Выберите модель</option>'}
+                                </select>
+                                <div class="menu_button iig-refresh-btn" id="iig_refresh_models" title="Обновить список моделей"><i class="fa-solid fa-arrows-rotate"></i></div>
+                            </div>
+
+                            <div class="flex-row">
+                                <label>Размер (OpenAI)</label>
+                                <select id="iig_size" class="flex1">
+                                    <option value="1024x1024" ${settings.size === '1024x1024' ? 'selected' : ''}>1024×1024</option>
+                                    <option value="1536x1024" ${settings.size === '1536x1024' ? 'selected' : ''}>1536×1024</option>
+                                    <option value="1024x1536" ${settings.size === '1024x1536' ? 'selected' : ''}>1024×1536</option>
+                                    <option value="auto" ${settings.size === 'auto' ? 'selected' : ''}>auto</option>
+                                </select>
+                            </div>
+
+                            <div class="flex-row">
+                                <label>Качество</label>
+                                <select id="iig_quality" class="flex1">
+                                    <option value="standard" ${settings.quality === 'standard' ? 'selected' : ''}>standard</option>
+                                    <option value="hd" ${settings.quality === 'hd' ? 'selected' : ''}>hd</option>
+                                    <option value="low" ${settings.quality === 'low' ? 'selected' : ''}>low</option>
+                                </select>
+                            </div>
+
+                            <div id="iig_gemini_section" class="${settings.apiType !== 'gemini' ? 'hidden' : ''}">
+                                <div class="flex-row">
+                                    <label>Aspect Ratio</label>
+                                    <select id="iig_aspect_ratio" class="flex1">
+                                        ${['1:1','2:3','3:2','3:4','4:3','4:5','5:4','9:16','16:9','21:9'].map(r =>
+                                            `<option value="${r}" ${settings.aspectRatio === r ? 'selected' : ''}>${r}</option>`
+                                        ).join('')}
+                                    </select>
+                                </div>
+                                <div class="flex-row">
+                                    <label>Image Size</label>
+                                    <select id="iig_image_size" class="flex1">
+                                        ${['1K','2K','4K'].map(s =>
+                                            `<option value="${s}" ${settings.imageSize === s ? 'selected' : ''}>${s}</option>`
+                                        ).join('')}
+                                    </select>
+                                </div>
+                            </div>
+
                         </div>
-                        <div id="iig_refresh_avatars" class="menu_button iig-refresh-btn" title="Обновить список"><i class="fa-solid fa-sync"></i></div>
                     </div>
 
-                    <hr>
-                    <h4>👗 Гардероб (одежда)</h4>
-                    <p class="hint">Загрузите картинки с одеждой. Выбранный наряд отправляется как референс. Если слоты заняты лицами (макс. 4 картинки), одежда отправляется только текстовым описанием.</p>
-
-                    <label class="checkbox_label">
-                        <input type="checkbox" id="iig_inject_wardrobe" ${settings.injectWardrobeToChat ? 'checked' : ''}>
-                        <span>Инжектить описание одежды в промпт текстовой модели</span>
-                    </label>
-                    <div class="flex-row" style="margin-top:5px;">
-                        <label for="iig_wardrobe_injection_depth">Глубина инжекта</label>
-                        <input type="number" id="iig_wardrobe_injection_depth" class="text_pole flex1" value="${settings.wardrobeInjectionDepth || 1}" min="0" max="10">
+                    <!-- ======= SECTION: Style ======= -->
+                    <div class="iig-collapsible" data-section-id="style">
+                        <div class="iig-collapsible-header">
+                            <i class="fa-solid fa-chevron-down iig-collapse-icon"></i>
+                            <span>🎨 Стиль по умолчанию</span>
+                        </div>
+                        <div class="iig-collapsible-content">
+                            <textarea id="iig_default_style" class="text_pole" rows="3" placeholder="Стиль, добавляемый ко всем генерациям...">${settings.defaultStyle || ''}</textarea>
+                            <p class="hint">Этот стиль будет добавлен к каждому промпту автоматически.</p>
+                        </div>
                     </div>
 
-                    <h5 style="margin:10px 0 4px;">Одежда персонажа</h5>
-                    <div id="iig_wardrobe_char"></div>
-                    <div style="display:flex;gap:6px;margin-top:6px;">
-                        <input type="text" id="iig_wardrobe_char_name" class="text_pole flex1" placeholder="Название наряда">
-                        <input type="file" id="iig_wardrobe_char_file" accept="image/*" style="display:none;">
-                        <div id="iig_wardrobe_char_add" class="menu_button" title="Добавить одежду"><i class="fa-solid fa-plus"></i> Добавить</div>
+                    <!-- ======= SECTION: Avatars ======= -->
+                    <div class="iig-collapsible" data-section-id="avatars">
+                        <div class="iig-collapsible-header">
+                            <i class="fa-solid fa-chevron-down iig-collapse-icon"></i>
+                            <span>👤 Аватары и референсы</span>
+                        </div>
+                        <div class="iig-collapsible-content">
+                            <label class="checkbox_label">
+                                <input type="checkbox" id="iig_auto_detect_names" ${settings.autoDetectNames ? 'checked' : ''}>
+                                <span>Авто-определение имён в промпте</span>
+                            </label>
+                            <p class="hint">Если имя персонажа/юзера найдено в промпте картинки, аватар отправится автоматически.</p>
+
+                            <label class="checkbox_label">
+                                <input type="checkbox" id="iig_send_char_avatar" ${settings.sendCharAvatar ? 'checked' : ''}>
+                                <span>Всегда отправлять аватар персонажа</span>
+                            </label>
+                            <div id="iig-char-avatar-preview" class="iig-avatar-preview" style="margin-bottom:8px;">
+                                <img src="" alt="Аватар персонажа">
+                            </div>
+
+                            <label class="checkbox_label">
+                                <input type="checkbox" id="iig_send_user_avatar" ${settings.sendUserAvatar ? 'checked' : ''}>
+                                <span>Всегда отправлять аватар юзера</span>
+                            </label>
+
+                            <div id="iig_user_avatar_row" class="${!settings.sendUserAvatar ? 'hidden' : ''}" style="margin-top:4px;">
+                                <div class="flex-row">
+                                    <label>Аватар юзера</label>
+                                    <div class="iig-avatar-dropdown flex1" id="iig_avatar_dropdown">
+                                        <div class="iig-avatar-dropdown-selected" id="iig_avatar_dropdown_selected">
+                                            ${settings.userAvatarFile
+                                                ? `<img class="iig-dropdown-thumb" src="/User Avatars/${encodeURIComponent(settings.userAvatarFile)}">
+                                                   <span class="iig-dropdown-text">${settings.userAvatarFile}</span>`
+                                                : `<div class="iig-dropdown-placeholder"><i class="fa-solid fa-user"></i></div>
+                                                   <span class="iig-dropdown-text">Не выбран</span>`
+                                            }
+                                            <i class="fa-solid fa-chevron-down iig-dropdown-arrow"></i>
+                                        </div>
+                                        <div class="iig-avatar-dropdown-list" id="iig_avatar_dropdown_list"></div>
+                                    </div>
+                                    <div class="menu_button iig-refresh-btn" id="iig_refresh_avatars" title="Обновить список"><i class="fa-solid fa-arrows-rotate"></i></div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
-                    <h5 style="margin:14px 0 4px;">Одежда юзера</h5>
-                    <div id="iig_wardrobe_user"></div>
-                    <div style="display:flex;gap:6px;margin-top:6px;">
-                        <input type="text" id="iig_wardrobe_user_name" class="text_pole flex1" placeholder="Название наряда">
-                        <input type="file" id="iig_wardrobe_user_file" accept="image/*" style="display:none;">
-                        <div id="iig_wardrobe_user_add" class="menu_button" title="Добавить одежду"><i class="fa-solid fa-plus"></i> Добавить</div>
+                    <!-- ======= SECTION: Wardrobe Char ======= -->
+                    <div class="iig-collapsible" data-section-id="wardrobe_char">
+                        <div class="iig-collapsible-header">
+                            <i class="fa-solid fa-chevron-down iig-collapse-icon"></i>
+                            <span>👗 Гардероб — Персонаж</span>
+                        </div>
+                        <div class="iig-collapsible-content">
+                            <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                                <input type="text" id="iig_wardrobe_char_name" class="text_pole flex1" placeholder="Название наряда...">
+                                <div class="menu_button" id="iig_wardrobe_char_add"><i class="fa-solid fa-plus"></i> Добавить</div>
+                                <input type="file" id="iig_wardrobe_char_file" accept="image/*" style="display:none;">
+                            </div>
+                            <div id="iig_wardrobe_char"></div>
+                        </div>
                     </div>
 
-                    <hr>
-                    <h4>🤖 Vision API для описаний одежды</h4>
-                    <p class="hint">Текстовая/vision модель для автогенерации описаний. Пустые поля = основные настройки API.</p>
-
-                    <div class="flex-row">
-                        <label for="iig_wardrobe_desc_endpoint">Эндпоинт</label>
-                        <input type="text" id="iig_wardrobe_desc_endpoint" class="text_pole flex1" value="${settings.wardrobeDescEndpoint || ''}" placeholder="https://... (пусто = основной)">
-                    </div>
-                    <div class="flex-row">
-                        <label for="iig_wardrobe_desc_api_key">API ключ</label>
-                        <input type="password" id="iig_wardrobe_desc_api_key" class="text_pole flex1" value="${settings.wardrobeDescApiKey || ''}">
-                        <div id="iig_desc_key_toggle" class="menu_button iig-key-toggle" title="Показать/Скрыть"><i class="fa-solid fa-eye"></i></div>
-                    </div>
-                    <div class="flex-row">
-                        <label for="iig_wardrobe_desc_model">Модель</label>
-                        <select id="iig_wardrobe_desc_model" class="flex1">
-                            ${settings.wardrobeDescModel ? `<option value="${settings.wardrobeDescModel}" selected>${settings.wardrobeDescModel}</option>` : '<option value="">-- Выберите --</option>'}
-                        </select>
-                        <div id="iig_refresh_desc_models" class="menu_button iig-refresh-btn" title="Обновить"><i class="fa-solid fa-sync"></i></div>
-                    </div>
-                    <div style="margin-top:5px;">
-                        <label for="iig_wardrobe_desc_prompt">Промпт для генерации описания</label>
-                        <textarea id="iig_wardrobe_desc_prompt" class="text_pole" rows="3" placeholder="Describe this clothing outfit...">${settings.wardrobeDescPrompt || defaultSettings.wardrobeDescPrompt}</textarea>
+                    <!-- ======= SECTION: Wardrobe User ======= -->
+                    <div class="iig-collapsible" data-section-id="wardrobe_user">
+                        <div class="iig-collapsible-header">
+                            <i class="fa-solid fa-chevron-down iig-collapse-icon"></i>
+                            <span>👗 Гардероб — Юзер</span>
+                        </div>
+                        <div class="iig-collapsible-content">
+                            <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                                <input type="text" id="iig_wardrobe_user_name" class="text_pole flex1" placeholder="Название наряда...">
+                                <div class="menu_button" id="iig_wardrobe_user_add"><i class="fa-solid fa-plus"></i> Добавить</div>
+                                <input type="file" id="iig_wardrobe_user_file" accept="image/*" style="display:none;">
+                            </div>
+                            <div id="iig_wardrobe_user"></div>
+                        </div>
                     </div>
 
-                    <hr>
-                    <h4>NPC-референсы</h4>
-                    <p class="hint">Добавьте NPC. Референс отправляется автоматически, если имя NPC встречается в промпте.</p>
-
-                    <div id="iig_npc_list"></div>
-                    <div style="display:flex;gap:6px;margin-top:8px;">
-                        <input type="text" id="iig_npc_new_name" class="text_pole flex1" placeholder="Имя NPC">
-                        <div id="iig_npc_add" class="menu_button" title="Добавить NPC"><i class="fa-solid fa-plus"></i> Добавить</div>
+                    <!-- ======= SECTION: Wardrobe Injection ======= -->
+                    <div class="iig-collapsible" data-section-id="wardrobe_inject">
+                        <div class="iig-collapsible-header">
+                            <i class="fa-solid fa-chevron-down iig-collapse-icon"></i>
+                            <span>💉 Инжект гардероба в чат</span>
+                        </div>
+                        <div class="iig-collapsible-content">
+                            <label class="checkbox_label">
+                                <input type="checkbox" id="iig_inject_wardrobe" ${settings.injectWardrobeToChat ? 'checked' : ''}>
+                                <span>Инжектить описание одежды в чат</span>
+                            </label>
+                            <p class="hint">Описание активной одежды будет добавлено в контекст для текстовой модели.</p>
+                            <div class="flex-row">
+                                <label>Глубина инжекта</label>
+                                <input type="number" id="iig_wardrobe_injection_depth" class="text_pole" value="${settings.wardrobeInjectionDepth || 1}" min="0" max="100" style="width:70px;">
+                            </div>
+                        </div>
                     </div>
 
-                    <hr>
-                    <h4>Обработка ошибок</h4>
+                    <!-- ======= SECTION: Vision API ======= -->
+                    <div class="iig-collapsible" data-section-id="vision">
+                        <div class="iig-collapsible-header">
+                            <i class="fa-solid fa-chevron-down iig-collapse-icon"></i>
+                            <span>🤖 Vision API для описаний одежды</span>
+                        </div>
+                        <div class="iig-collapsible-content">
+                            <p class="hint">Отдельный API для генерации текстовых описаний одежды по картинке. Если не настроено, используется основной API.</p>
+                            <div class="flex-row">
+                                <label>Эндпоинт</label>
+                                <input type="text" id="iig_wardrobe_desc_endpoint" class="text_pole flex1" value="${settings.wardrobeDescEndpoint || ''}" placeholder="Оставьте пустым для основного">
+                            </div>
+                            <div class="flex-row">
+                                <label>API ключ</label>
+                                <input type="password" id="iig_wardrobe_desc_api_key" class="text_pole flex1" value="${settings.wardrobeDescApiKey || ''}" placeholder="Оставьте пустым для основного">
+                                <div class="menu_button iig-key-toggle" id="iig_desc_key_toggle"><i class="fa-solid fa-eye"></i></div>
+                            </div>
+                            <div class="flex-row">
+                                <label>Модель</label>
+                                <select id="iig_wardrobe_desc_model" class="flex1">
+                                    ${settings.wardrobeDescModel ? `<option value="${settings.wardrobeDescModel}" selected>${settings.wardrobeDescModel}</option>` : '<option value="">Выберите модель</option>'}
+                                </select>
+                                <div class="menu_button iig-refresh-btn" id="iig_refresh_desc_models" title="Обновить"><i class="fa-solid fa-arrows-rotate"></i></div>
+                            </div>
+                            <div class="flex-row" style="align-items:flex-start;">
+                                <label>Промпт</label>
+                                <textarea id="iig_wardrobe_desc_prompt" class="text_pole flex1" rows="3">${settings.wardrobeDescPrompt || ''}</textarea>
+                            </div>
+                        </div>
+                    </div>
 
-                    <div class="flex-row">
-                        <label for="iig_max_retries">Макс. повторов</label>
-                        <input type="number" id="iig_max_retries" class="text_pole flex1" value="${settings.maxRetries}" min="0" max="5">
+                    <!-- ======= SECTION: NPC ======= -->
+                    <div class="iig-collapsible" data-section-id="npc">
+                        <div class="iig-collapsible-header">
+                            <i class="fa-solid fa-chevron-down iig-collapse-icon"></i>
+                            <span>🎭 NPC-референсы</span>
+                        </div>
+                        <div class="iig-collapsible-content">
+                            <p class="hint">Добавьте NPC с картинками. Если имя NPC появляется в промпте картинки, его аватар будет отправлен как референс.</p>
+                            <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+                                <input type="text" id="iig_npc_new_name" class="text_pole flex1" placeholder="Имя NPC...">
+                                <div class="menu_button" id="iig_npc_add"><i class="fa-solid fa-plus"></i> Добавить</div>
+                            </div>
+                            <div id="iig_npc_list"></div>
+                        </div>
                     </div>
-                    <div class="flex-row">
-                        <label for="iig_retry_delay">Задержка (мс)</label>
-                        <input type="number" id="iig_retry_delay" class="text_pole flex1" value="${settings.retryDelay}" min="500" max="10000" step="500">
-                    </div>
-                    <div class="flex-row">
-                        <label for="iig_request_timeout">Таймаут (сек)</label>
-                        <input type="number" id="iig_request_timeout" class="text_pole flex1" value="${settings.requestTimeout || 120}" min="10" max="600" step="10">
-                    </div>
-                    <p class="hint">Если сервер не ответил за указанное время, запрос отменяется. Кнопка ✕ на каждой генерируемой картинке.</p>
 
-                    <hr>
-                    <h4>Отладка</h4>
-                    <div class="flex-row">
-                        <div id="iig_export_logs" class="menu_button" style="width:100%;"><i class="fa-solid fa-download"></i> Экспорт логов</div>
+                    <!-- ======= SECTION: Error Handling & Logs ======= -->
+                    <div class="iig-collapsible" data-section-id="errors">
+                        <div class="iig-collapsible-header">
+                            <i class="fa-solid fa-chevron-down iig-collapse-icon"></i>
+                            <span>⚙️ Генерация и ошибки</span>
+                        </div>
+                        <div class="iig-collapsible-content">
+                            <div class="flex-row">
+                                <label>Макс. повторов</label>
+                                <input type="number" id="iig_max_retries" class="text_pole" value="${settings.maxRetries}" min="0" max="10" style="width:70px;">
+                            </div>
+                            <div class="flex-row">
+                                <label>Задержка повтора (мс)</label>
+                                <input type="number" id="iig_retry_delay" class="text_pole" value="${settings.retryDelay}" min="500" max="30000" step="500" style="width:90px;">
+                            </div>
+                            <div class="flex-row">
+                                <label>Таймаут (сек)</label>
+                                <input type="number" id="iig_request_timeout" class="text_pole" value="${settings.requestTimeout}" min="10" max="600" style="width:70px;">
+                            </div>
+                            <div style="margin-top:8px;">
+                                <div class="menu_button" id="iig_export_logs"><i class="fa-solid fa-download"></i> Экспорт логов</div>
+                            </div>
+                        </div>
                     </div>
+
                 </div>
             </div>
         </div>
@@ -2115,7 +2281,9 @@ function createSettingsUI() {
     container.insertAdjacentHTML('beforeend', html);
 
     bindSettingsEvents();
+    initCollapsibleSections();
     updateCharAvatarPreview();
+    renderPresetSelect();
 }
 
 function bindSettingsEvents() {
@@ -2178,6 +2346,8 @@ function bindSettingsEvents() {
     document.getElementById('iig_send_user_avatar')?.addEventListener('change', (e) => {
         settings.sendUserAvatar = e.target.checked; saveSettings();
         document.getElementById('iig_user_avatar_row')?.classList.toggle('hidden', !e.target.checked);
+
+        
     });
 
     // Avatar dropdown
@@ -2288,6 +2458,76 @@ function bindSettingsEvents() {
         nameInput.value = '';
         renderNpcList();
         toastr.success(`NPC "${name}" добавлен. Загрузите картинку!`);
+    });
+
+        // ===== PRESETS =====
+    document.getElementById('iig_preset_select')?.addEventListener('change', (e) => {
+        const presetId = e.target.value;
+        if (!presetId) {
+            settings.activePresetId = null;
+            saveSettings();
+            return;
+        }
+        if (loadPreset(presetId)) {
+            // Sync UI with loaded preset values
+            const s = getSettings();
+            const endpointEl = document.getElementById('iig_endpoint');
+            const apiKeyEl = document.getElementById('iig_api_key');
+            const apiTypeEl = document.getElementById('iig_api_type');
+            const modelEl = document.getElementById('iig_model');
+            const sizeEl = document.getElementById('iig_size');
+            const qualityEl = document.getElementById('iig_quality');
+            const aspectEl = document.getElementById('iig_aspect_ratio');
+            const imgSizeEl = document.getElementById('iig_image_size');
+
+            if (endpointEl) endpointEl.value = s.endpoint || '';
+            if (apiKeyEl) apiKeyEl.value = s.apiKey || '';
+            if (apiTypeEl) {
+                apiTypeEl.value = s.apiType;
+                document.getElementById('iig_gemini_section')?.classList.toggle('hidden', s.apiType !== 'gemini');
+            }
+            if (sizeEl) sizeEl.value = s.size;
+            if (qualityEl) qualityEl.value = s.quality;
+            if (aspectEl) aspectEl.value = s.aspectRatio;
+            if (imgSizeEl) imgSizeEl.value = s.imageSize;
+
+            // Refresh model list then select
+            if (modelEl) {
+                modelEl.innerHTML = `<option value="${s.model}" selected>${s.model}</option>`;
+            }
+
+            toastr.success('Пресет загружен', 'Пресеты API');
+        }
+    });
+
+    document.getElementById('iig_preset_save')?.addEventListener('click', () => {
+        const name = prompt('Название пресета:');
+        if (!name?.trim()) return;
+        saveCurrentAsPreset(name.trim());
+        renderPresetSelect();
+        toastr.success(`Пресет "${name}" сохранён`, 'Пресеты API');
+    });
+
+    document.getElementById('iig_preset_update')?.addEventListener('click', () => {
+        const select = document.getElementById('iig_preset_select');
+        const presetId = select?.value;
+        if (!presetId) { toastr.warning('Сначала выберите пресет'); return; }
+        const preset = settings.apiPresets.find(p => p.id === presetId);
+        if (!preset) return;
+        updatePresetFromCurrent(presetId);
+        toastr.success(`Пресет "${preset.name}" обновлён`, 'Пресеты API');
+    });
+
+    document.getElementById('iig_preset_delete')?.addEventListener('click', () => {
+        const select = document.getElementById('iig_preset_select');
+        const presetId = select?.value;
+        if (!presetId) { toastr.warning('Сначала выберите пресет'); return; }
+        const preset = settings.apiPresets.find(p => p.id === presetId);
+        if (!preset) return;
+        if (!confirm(`Удалить пресет "${preset.name}"?`)) return;
+        deletePreset(presetId);
+        renderPresetSelect();
+        toastr.info(`Пресет "${preset.name}" удалён`, 'Пресеты API');
     });
 
     // Error handling
