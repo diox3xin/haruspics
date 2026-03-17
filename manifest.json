@@ -1,0 +1,12 @@
+{
+    "display_name": "MG",
+    "loading_order": 100,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "harubunny",
+    "version": "beta 1.0",
+    "homePage": "https://github.com/diox3xin/haruspics/",
+    "auto_update": true
+}
