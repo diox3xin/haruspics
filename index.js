@@ -555,15 +555,9 @@ function initCollapsibleSections() {
 
 function nameAppearsInPrompt(name, prompt) {
     if (!name || !prompt) return false;
-    const nameLower = name.toLowerCase();
-    const promptLower = prompt.toLowerCase();
-    if (promptLower.includes(nameLower)) return true;
-    if (nameLower.length > 3) {
-        const nameBase1 = nameLower.slice(0, -1);
-        const nameBase2 = nameLower.slice(0, -2);
-        if (promptLower.includes(nameBase1) || promptLower.includes(nameBase2)) return true;
-    }
-    return false;
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`\\b${escaped}\\b`, 'i');
+    return regex.test(prompt);
 }
 
 // ============================================================
@@ -672,6 +666,16 @@ async function collectReferenceImages(prompt) {
 
     // ===== STEP 3: Apply 4-slot priority =====
 
+    // If faces alone exceed the limit, trim them (char > user > NPCs in order)
+    if (faceRefs.length > MAX_IMAGE_REFS) {
+        const trimmed = faceRefs.length - MAX_IMAGE_REFS;
+        const removed = faceRefs.splice(MAX_IMAGE_REFS);
+        for (const r of removed) {
+            iigLog('WARN', `Face ref "${r.name}" trimmed: exceeds ${MAX_IMAGE_REFS}-slot limit`);
+        }
+        warnings.push(`Слишком много лиц (${faceRefs.length + trimmed}). Последние ${trimmed} NPC не отправлены как рефы.`);
+    }
+
     const freeSlots = Math.max(0, MAX_IMAGE_REFS - faceRefs.length);
     const clothingAsImage = clothingRefs.slice(0, freeSlots);
     const clothingAsTextOnly = clothingRefs.slice(freeSlots);
@@ -686,7 +690,7 @@ async function collectReferenceImages(prompt) {
             });
             iigLog('INFO', `Clothing for "${c.name}" sent as TEXT (no image slot available): "${c.description.substring(0, 60)}..."`);
         } else {
-            const warn = `Одежда "${c.outfitName}" для ${c.name} не отправлена: нет свободного слота для картинки и нет текстового описания.`;
+            const warn = `Одежда "${c.outfitName}" для ${c.name} не отправлена: нет свободного слота и нет текстового описания.`;
             warnings.push(warn);
             iigLog('WARN', warn);
         }
@@ -695,10 +699,6 @@ async function collectReferenceImages(prompt) {
     // Final array: faces first, then clothing images
     const imageRefs = [...faceRefs, ...clothingAsImage];
 
-    iigLog('INFO', `Reference collection: ${faceRefs.length} face(s), ${clothingAsImage.length} clothing image(s), ${textOnlyClothing.length} clothing text(s), ${warnings.length} warning(s). Total image refs: ${imageRefs.length}/${MAX_IMAGE_REFS}`);
-
-    return { imageRefs, textOnlyClothing, warnings };
-}
 
 // ============================================================
 // IMAGE GENERATION: OpenAI
@@ -932,10 +932,21 @@ async function generateImageGemini(prompt, style, refData, options = {}) {
         headers['Authorization'] = `Bearer ${settings.apiKey}`;
     }
 
+        // Safety: serialize body and check size
+    let bodyString;
+    try {
+        bodyString = JSON.stringify(body);
+    } catch (serializeError) {
+        throw new Error(`Failed to serialize request body: ${serializeError.message}. Try reducing the number of reference images.`);
+    }
+
+    iigLog('INFO', `Gemini request body size: ${(bodyString.length / 1024 / 1024).toFixed(2)}MB`);
+
+
     const response = await fetch(url, {
         method: 'POST',
         headers,
-        body: JSON.stringify(body),
+        body: bodyString,
         signal: options.signal
     });
 
