@@ -909,9 +909,10 @@ async function generateImageGemini(prompt, style, refData, options = {}) {
     const baseUrl = settings.endpoint.replace(/\/$/, '');
     const isGoogleApi = baseUrl.includes('googleapis.com');
 
+    // For non-Google APIs (like closerouter), use standard OpenAI-compatible path
     const url = isGoogleApi
         ? `${baseUrl}/v1beta/models/${model}:generateContent?key=${settings.apiKey}`
-        : `${baseUrl}/v1beta/models/${model}:generateContent`;
+        : `${baseUrl}/v1/chat/completions`;
 
     let aspectRatio = options.aspectRatio || settings.aspectRatio || '1:1';
     if (!VALID_ASPECT_RATIOS.includes(aspectRatio)) aspectRatio = '1:1';
@@ -1738,8 +1739,17 @@ function renderNpcList() {
 
     for (let i = 0; i < settings.npcReferences.length; i++) {
         const npc = settings.npcReferences[i];
-        const row = document.createElement('div');
-        row.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:6px;';
+        
+        // Migrate old NPC structure
+        if (!Object.hasOwn(npc, 'appearance')) npc.appearance = '';
+        if (!Object.hasOwn(npc, 'outfit')) npc.outfit = '';
+
+        const card = document.createElement('div');
+        card.style.cssText = 'border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:8px;margin-bottom:8px;background:rgba(0,0,0,0.1);';
+
+        // Header row
+        const headerRow = document.createElement('div');
+        headerRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:8px;';
 
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
@@ -1750,7 +1760,7 @@ function renderNpcList() {
         });
 
         const preview = document.createElement('div');
-        preview.style.cssText = 'width:32px;height:32px;border-radius:6px;overflow:hidden;flex-shrink:0;';
+        preview.style.cssText = 'width:40px;height:40px;border-radius:6px;overflow:hidden;flex-shrink:0;cursor:pointer;';
         if (npc.imageData) {
             const img = document.createElement('img');
             img.src = `data:image/jpeg;base64,${npc.imageData}`;
@@ -1758,18 +1768,11 @@ function renderNpcList() {
             preview.appendChild(img);
         } else {
             preview.style.cssText += 'background:#2a2a2a;display:flex;align-items:center;justify-content:center;';
-            preview.innerHTML = '<i class="fa-solid fa-user" style="color:#5a5252;font-size:14px;"></i>';
+            preview.innerHTML = '<i class="fa-solid fa-user" style="color:#5a5252;font-size:16px;"></i>';
         }
 
-        const nameSpan = document.createElement('span');
-        nameSpan.textContent = npc.name;
-        nameSpan.style.cssText = 'flex:1;color:#e8e0e0;font-size:12px;';
-
-        const uploadBtn = document.createElement('div');
-        uploadBtn.className = 'menu_button';
-        uploadBtn.title = 'Загрузить картинку';
-        uploadBtn.innerHTML = '<i class="fa-solid fa-upload"></i>';
-        uploadBtn.addEventListener('click', () => {
+        // Click preview to upload
+        preview.addEventListener('click', () => {
             const fileInput = document.createElement('input');
             fileInput.type = 'file';
             fileInput.accept = 'image/*';
@@ -1794,24 +1797,79 @@ function renderNpcList() {
             fileInput.click();
         });
 
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = npc.name;
+        nameSpan.style.cssText = 'flex:1;color:#e8e0e0;font-size:13px;font-weight:500;';
+
+        const expandBtn = document.createElement('div');
+        expandBtn.className = 'menu_button';
+        expandBtn.title = 'Развернуть/свернуть';
+        expandBtn.innerHTML = '<i class="fa-solid fa-chevron-down"></i>';
+        expandBtn.dataset.expanded = 'false';
+
         const deleteBtn = document.createElement('div');
         deleteBtn.className = 'menu_button';
         deleteBtn.title = 'Удалить NPC';
         deleteBtn.innerHTML = '<i class="fa-solid fa-trash"></i>';
         deleteBtn.style.color = '#cc5555';
         deleteBtn.addEventListener('click', () => {
+            if (!confirm(`Удалить NPC "${npc.name}"?`)) return;
             settings.npcReferences.splice(i, 1);
             saveSettings();
             renderNpcList();
             toastr.info(`NPC "${npc.name}" удалён`, 'NPC');
         });
 
-        row.appendChild(checkbox);
-        row.appendChild(preview);
-        row.appendChild(nameSpan);
-        row.appendChild(uploadBtn);
-        row.appendChild(deleteBtn);
-        container.appendChild(row);
+        headerRow.appendChild(checkbox);
+        headerRow.appendChild(preview);
+        headerRow.appendChild(nameSpan);
+        headerRow.appendChild(expandBtn);
+        headerRow.appendChild(deleteBtn);
+
+        // Details panel (collapsible)
+        const detailsPanel = document.createElement('div');
+        detailsPanel.style.cssText = 'display:none;padding-top:8px;border-top:1px solid rgba(255,255,255,0.05);';
+        detailsPanel.innerHTML = `
+            <div style="margin-bottom:8px;">
+                <label style="font-size:11px;color:#9a9292;display:block;margin-bottom:3px;">Описание внешности:</label>
+                <textarea class="text_pole npc-appearance-input" rows="2" style="width:100%;font-size:11px;resize:vertical;" 
+                    placeholder="Опишите внешность NPC (рост, телосложение, черты лица, цвет глаз, волосы и т.д.)..."
+                    data-npc-index="${i}">${npc.appearance || ''}</textarea>
+            </div>
+            <div>
+                <label style="font-size:11px;color:#9a9292;display:block;margin-bottom:3px;">Описание наряда:</label>
+                <textarea class="text_pole npc-outfit-input" rows="2" style="width:100%;font-size:11px;resize:vertical;" 
+                    placeholder="Опишите типичный наряд NPC (одежда, аксессуары, обувь и т.д.)..."
+                    data-npc-index="${i}">${npc.outfit || ''}</textarea>
+            </div>
+            <p class="hint" style="margin-top:6px;font-size:10px;">Эти описания будут добавлены в промпт, когда имя NPC появится в сцене.</p>
+        `;
+
+        // Toggle expand/collapse
+        expandBtn.addEventListener('click', () => {
+            const isExpanded = expandBtn.dataset.expanded === 'true';
+            expandBtn.dataset.expanded = !isExpanded;
+            detailsPanel.style.display = isExpanded ? 'none' : 'block';
+            expandBtn.querySelector('i').classList.toggle('fa-chevron-down', isExpanded);
+            expandBtn.querySelector('i').classList.toggle('fa-chevron-up', !isExpanded);
+        });
+
+        // Save on blur
+        detailsPanel.querySelector('.npc-appearance-input')?.addEventListener('blur', (e) => {
+            const idx = parseInt(e.target.dataset.npcIndex);
+            settings.npcReferences[idx].appearance = e.target.value;
+            saveSettings();
+        });
+
+        detailsPanel.querySelector('.npc-outfit-input')?.addEventListener('blur', (e) => {
+            const idx = parseInt(e.target.dataset.npcIndex);
+            settings.npcReferences[idx].outfit = e.target.value;
+            saveSettings();
+        });
+
+        card.appendChild(headerRow);
+        card.appendChild(detailsPanel);
+        container.appendChild(card);
     }
 }
 
