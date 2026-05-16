@@ -111,6 +111,45 @@ function isGeminiModel(modelId) {
     return modelId.toLowerCase().includes('nano-banana');
 }
 
+function buildGeminiRequestCandidates(baseUrl, model, apiKey) {
+    const clean = baseUrl.replace(/\/$/, '');
+    const lower = clean.toLowerCase();
+
+    if (lower.includes('googleapis.com')) {
+        return [{
+            url: `${clean}/v1beta/models/${model}:generateContent?key=${apiKey}`,
+            headers: { 'Content-Type': 'application/json' }
+        }];
+    }
+
+    const candidates = [];
+    const pushCandidate = (url) => {
+        if (!candidates.some(candidate => candidate.url === url)) {
+            candidates.push({
+                url,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`
+                }
+            });
+        }
+    };
+
+    if (/\/v1beta$/i.test(clean)) {
+        pushCandidate(`${clean}/models/${model}:generateContent`);
+        pushCandidate(`${clean.replace(/\/v1beta$/i, '')}/v1/models/${model}:generateContent`);
+    } else if (/\/v1$/i.test(clean)) {
+        pushCandidate(`${clean.replace(/\/v1$/i, '')}/v1beta/models/${model}:generateContent`);
+        pushCandidate(`${clean}/models/${model}:generateContent`);
+    } else {
+        pushCandidate(`${clean}/v1beta/models/${model}:generateContent`);
+        pushCandidate(`${clean}/v1/models/${model}:generateContent`);
+        pushCandidate(`${clean}/models/${model}:generateContent`);
+    }
+
+    return candidates;
+}
+
 // ============================================================
 // SETTINGS
 // ============================================================
@@ -1093,19 +1132,7 @@ async function generateImageGemini(prompt, style, refData, options = {}) {
     const settings = getSettings();
     const model = settings.model;
     const baseUrl = settings.endpoint.replace(/\/$/, '');
-    const isGoogleApi = baseUrl.includes('googleapis.com');
-    
-    // Check if this is a proxy that expects OpenAI format (closerouter, voidai, etc)
-    const isOpenAIProxy = baseUrl.includes('closerouter') || baseUrl.includes('voidai') || 
-                          baseUrl.includes('openrouter') || !isGoogleApi;
-
-    // For OpenAI-compatible proxies, use OpenAI format instead
-    if (isOpenAIProxy) {
-        return await generateImageOpenAI(prompt, style, refData, options);
-    }
-
-    // For real Google API, use Gemini format
-    const url = `${baseUrl}/v1beta/models/${model}:generateContent?key=${settings.apiKey}`;
+    const requestCandidates = buildGeminiRequestCandidates(baseUrl, model, settings.apiKey);
 
     let aspectRatio = options.aspectRatio || settings.aspectRatio || '1:1';
     if (!VALID_ASPECT_RATIOS.includes(aspectRatio)) aspectRatio = '1:1';
@@ -1225,11 +1252,6 @@ async function generateImageGemini(prompt, style, refData, options = {}) {
         }
     };
 
-    const headers = { 'Content-Type': 'application/json' };
-    if (!isGoogleApi) {
-        headers['Authorization'] = `Bearer ${settings.apiKey}`;
-    }
-
         // Safety: serialize body and check size
     let bodyString;
     try {
@@ -1240,17 +1262,31 @@ async function generateImageGemini(prompt, style, refData, options = {}) {
 
     iigLog('INFO', `Gemini request body size: ${(bodyString.length / 1024 / 1024).toFixed(2)}MB`);
 
+    let response = null;
+    let lastStatus = 0;
+    let lastText = '';
 
-    const response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: bodyString,
-        signal: options.signal
-    });
+    for (const candidate of requestCandidates) {
+        iigLog('INFO', `Gemini endpoint candidate: ${candidate.url}`);
+        const res = await fetch(candidate.url, {
+            method: 'POST',
+            headers: candidate.headers,
+            body: bodyString,
+            signal: options.signal
+        });
 
-    if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`API Error (${response.status}): ${text}`);
+        if (res.ok) {
+            response = res;
+            break;
+        }
+
+        lastStatus = res.status;
+        lastText = await res.text().catch(() => '');
+        iigLog('WARN', `Gemini endpoint failed (${res.status}) ${candidate.url} :: ${lastText.substring(0, 200)}`);
+    }
+
+    if (!response) {
+        throw new Error(`API Error (${lastStatus || '?'}): ${lastText || 'All Gemini endpoints failed'}`);
     }
 
     const result = await response.json();
@@ -1312,11 +1348,14 @@ async function generateImageWithRetry(prompt, style, onStatusUpdate, options = {
             onStatusUpdate?.(`Генерация${attempt > 0 ? ` (повтор ${attempt}/${settings.maxRetries})` : ''}...`);
             const genOptions = { ...options, signal: timeoutController.signal };
 
-            if (settings.apiType === 'gemini' || isGeminiModel(settings.model)) {
+            const useGeminiApi = settings.apiType === 'gemini' ||
+                (!['openai', 'gemini'].includes(settings.apiType) && isGeminiModel(settings.model));
+
+            if (useGeminiApi) {
                 return await generateImageGemini(prompt, style, refData, genOptions);
-            } else {
-                return await generateImageOpenAI(prompt, style, refData, genOptions);
             }
+
+            return await generateImageOpenAI(prompt, style, refData, genOptions);
         } catch (error) {
             lastError = error;
             if (error.name === 'AbortError') {
@@ -3076,12 +3115,8 @@ function bindSettingsEvents() {
     });
 
     document.getElementById('iig_model')?.addEventListener('change', (e) => {
-        settings.model = e.target.value; saveSettings();
-        if (isGeminiModel(e.target.value)) {
-            document.getElementById('iig_api_type').value = 'gemini';
-            settings.apiType = 'gemini';
-            document.getElementById('iig_gemini_section')?.classList.remove('hidden');
-        }
+        settings.model = e.target.value;
+        saveSettings();
     });
 
     document.getElementById('iig_refresh_models')?.addEventListener('click', async (e) => {
