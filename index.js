@@ -71,6 +71,11 @@ const defaultSettings = Object.freeze({
     wardrobeDescApiKey: '',
     wardrobeDescModel: '',
     wardrobeDescPrompt: 'Describe this clothing outfit in detail for a character in a roleplay. Focus on: type of garment, color, material/texture, style, notable features, accessories. Be concise but thorough (2-4 sentences). Write in English.',
+    // ===== NEW: Hairstyles =====
+    hairstyleItems: [],
+    activeHairstyleChar: null,
+    activeHairstyleUser: null,
+    hairstyleSendMode: 'both', // 'both', 'text', 'none'
     // ===== NEW: Presets =====
     apiPresets: [],
     activePresetId: null,
@@ -341,6 +346,96 @@ function addWardrobeItem(name, imageData, target = 'char') {
     settings.wardrobeItems.push(item);
     saveSettings();
     return item;
+}
+
+// ============================================================
+// HAIRSTYLE SYSTEM
+// ============================================================
+
+function addHairstyleItem(name, imageData, target = 'char') {
+    const settings = getSettings();
+    const item = {
+        id: 'hair_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8),
+        name: name || 'Hairstyle',
+        imageData,
+        description: '',
+        target,
+        createdAt: Date.now()
+    };
+    if (!settings.hairstyleItems) settings.hairstyleItems = [];
+    settings.hairstyleItems.push(item);
+    saveSettings();
+    return item;
+}
+
+function removeHairstyleItem(itemId) {
+    const settings = getSettings();
+    if (settings.activeHairstyleChar === itemId) settings.activeHairstyleChar = null;
+    if (settings.activeHairstyleUser === itemId) settings.activeHairstyleUser = null;
+    settings.hairstyleItems = settings.hairstyleItems.filter(i => i.id !== itemId);
+    saveSettings();
+}
+
+function setActiveHairstyle(itemId, target) {
+    const settings = getSettings();
+    const key = target === 'char' ? 'activeHairstyleChar' : 'activeHairstyleUser';
+    settings[key] = settings[key] === itemId ? null : itemId;
+    saveSettings();
+}
+
+function getActiveHairstyleItem(target) {
+    const settings = getSettings();
+    const activeId = settings[target === 'char' ? 'activeHairstyleChar' : 'activeHairstyleUser'];
+    return activeId ? (settings.hairstyleItems?.find(i => i.id === activeId) || null) : null;
+}
+
+function updateHairstyleItemDescription(itemId, description) {
+    const settings = getSettings();
+    const item = settings.hairstyleItems?.find(i => i.id === itemId);
+    if (item) {
+        item.description = description;
+        saveSettings();
+    }
+}
+
+async function generateHairstyleDescription(itemId) {
+    const settings = getSettings();
+    const item = settings.hairstyleItems?.find(i => i.id === itemId);
+    if (!item?.imageData) throw new Error('Нет данных изображения');
+
+    const endpoint = settings.wardrobeDescEndpoint || settings.endpoint;
+    const apiKey = settings.wardrobeDescApiKey || settings.apiKey;
+    const model = settings.wardrobeDescModel;
+    if (!endpoint) throw new Error('Не настроен эндпоинт для генерации описаний');
+    if (!apiKey) throw new Error('Не настроен API ключ');
+    if (!model) throw new Error('Не выбрана модель для описаний');
+
+    const promptText = 'Describe this hairstyle in detail for a character in a roleplay. Focus on: length, color, texture, style (straight/curly/wavy), cut, notable features (bangs, layers, etc), accessories. Be concise but thorough (2-3 sentences). Write in English.';
+
+    const response = await fetch(`${endpoint.replace(/\/$/, '')}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            model,
+            max_tokens: 500,
+            temperature: 0.3,
+            messages: [{
+                role: 'user',
+                content: [
+                    { type: 'image_url', image_url: { url: `data:image/png;base64,${item.imageData}` } },
+                    { type: 'text', text: promptText }
+                ]
+            }],
+        })
+    });
+
+    if (!response.ok) throw new Error(`API ошибка (${response.status}): ${await response.text().catch(() => '?')}`);
+    const result = await response.json();
+    const description = result.choices?.[0]?.message?.content?.trim();
+    if (!description) throw new Error('Модель вернула пустой ответ');
+
+    iigLog('INFO', `Generated hairstyle description for "${item.name}": ${description.substring(0, 100)}...`);
+    return description;
 }
 
 function removeWardrobeItem(itemId) {
@@ -1896,6 +1991,181 @@ function renderWardrobeDescriptionPanel(target) {
 }
 
 // ============================================================
+// UI: HAIRSTYLE GRID & DESCRIPTION PANEL
+// ============================================================
+
+function renderHairstyleGrid(target) {
+    const settings = getSettings();
+    const containerId = `iig_hairstyle_${target}`;
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    const items = (settings.hairstyleItems || []).filter(i => i.target === target);
+    const activeId = settings[target === 'char' ? 'activeHairstyleChar' : 'activeHairstyleUser'];
+
+    if (items.length === 0) {
+        container.innerHTML = '<div style="color:#5a5252;font-size:11px;padding:8px 0;">Нет причёсок. Нажмите + чтобы добавить.</div>';
+        renderHairstyleDescriptionPanel(target);
+        return;
+    }
+
+    container.innerHTML = '';
+    container.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin:6px 0;';
+
+    for (const item of items) {
+        const isActive = item.id === activeId;
+
+        const card = document.createElement('div');
+        card.style.cssText = `position:relative;width:80px;height:100px;border-radius:8px;overflow:hidden;cursor:pointer;border:2px solid ${isActive ? '#ffb6c1' : 'rgba(255,255,255,0.08)'};transition:border-color 0.2s;`;
+
+        const img = document.createElement('img');
+        img.src = `data:image/png;base64,${item.imageData}`;
+        img.style.cssText = 'width:100%;height:100%;object-fit:cover;';
+        card.appendChild(img);
+
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,0.8));padding:3px 5px;';
+
+        const nameEl = document.createElement('span');
+        nameEl.textContent = item.name;
+        nameEl.style.cssText = 'font-size:9px;color:#fff;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        nameEl.title = item.name;
+        overlay.appendChild(nameEl);
+
+        if (item.description) {
+            const descIcon = document.createElement('i');
+            descIcon.className = 'fa-solid fa-file-lines';
+            descIcon.style.cssText = 'font-size:8px;color:#aaf;position:absolute;top:3px;left:3px;';
+            descIcon.title = 'Есть описание';
+            card.appendChild(descIcon);
+        }
+
+        card.appendChild(overlay);
+
+        if (isActive) {
+            const check = document.createElement('div');
+            check.style.cssText = 'position:absolute;top:3px;right:3px;width:18px;height:18px;border-radius:50%;background:#ffb6c1;display:flex;align-items:center;justify-content:center;';
+            check.innerHTML = '<i class="fa-solid fa-check" style="font-size:10px;color:#000;"></i>';
+            card.appendChild(check);
+        }
+
+        const deleteBtn = document.createElement('div');
+        deleteBtn.style.cssText = 'position:absolute;bottom:18px;right:3px;width:18px;height:18px;border-radius:50%;background:rgba(200,50,50,0.8);display:none;align-items:center;justify-content:center;cursor:pointer;';
+        deleteBtn.innerHTML = '<i class="fa-solid fa-trash" style="font-size:8px;color:#fff;"></i>';
+        deleteBtn.title = 'Удалить';
+        deleteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            removeHairstyleItem(item.id);
+            renderHairstyleGrid(target);
+            toastr.info('Причёска удалена');
+        });
+        card.appendChild(deleteBtn);
+
+        card.addEventListener('mouseenter', () => { deleteBtn.style.display = 'flex'; });
+        card.addEventListener('mouseleave', () => { deleteBtn.style.display = 'none'; });
+
+        card.addEventListener('click', () => {
+            setActiveHairstyle(item.id, target);
+            renderHairstyleGrid(target);
+        });
+
+        container.appendChild(card);
+    }
+
+    renderHairstyleDescriptionPanel(target);
+}
+
+function renderHairstyleDescriptionPanel(target) {
+    const panelId = `iig_hairstyle_desc_${target}`;
+    let panel = document.getElementById(panelId);
+
+    if (!panel) {
+        const grid = document.getElementById(`iig_hairstyle_${target}`);
+        if (!grid) return;
+        panel = document.createElement('div');
+        panel.id = panelId;
+        grid.parentNode.insertBefore(panel, grid.nextSibling);
+    }
+
+    const activeItem = getActiveHairstyleItem(target);
+    if (!activeItem) {
+        panel.innerHTML = '';
+        panel.style.display = 'none';
+        return;
+    }
+
+    panel.style.display = 'block';
+    panel.style.cssText = 'margin:8px 0;padding:8px;border:1px solid rgba(255,182,193,0.15);border-radius:8px;background:rgba(255,182,193,0.03);';
+    panel.innerHTML = `
+        <div style="font-size:11px;color:#e8e0e0;margin-bottom:4px;">
+            <i class="fa-solid fa-scissors" style="margin-right:4px;"></i>
+            Описание: <b>${activeItem.name}</b>
+        </div>
+        <textarea class="text_pole" rows="3" style="width:100%;font-size:11px;resize:vertical;"
+            placeholder="Введите описание причёски вручную или сгенерируйте через AI..."
+            data-hairstyle-id="${activeItem.id}">${activeItem.description || ''}</textarea>
+        <div style="display:flex;gap:6px;margin-top:4px;">
+            <div class="menu_button iig-hair-desc-generate" data-hairstyle-id="${activeItem.id}" style="flex:1;font-size:11px;">
+                <i class="fa-solid fa-robot"></i> Сгенерировать
+            </div>
+            <div class="menu_button iig-hair-desc-save" data-hairstyle-id="${activeItem.id}" style="font-size:11px;">
+                <i class="fa-solid fa-floppy-disk"></i> Сохранить
+            </div>
+            <div class="menu_button iig-hair-desc-clear" data-hairstyle-id="${activeItem.id}" style="font-size:11px;">
+                <i class="fa-solid fa-eraser"></i>
+            </div>
+        </div>
+        <div id="iig_hair_desc_status_${target}" style="display:none;font-size:10px;margin-top:4px;"></div>
+    `;
+
+    const textarea = panel.querySelector('textarea');
+
+    textarea?.addEventListener('blur', () => {
+        updateHairstyleItemDescription(textarea.dataset.hairstyleId, textarea.value);
+    });
+
+    panel.querySelector('.iig-hair-desc-save')?.addEventListener('click', () => {
+        updateHairstyleItemDescription(textarea.dataset.hairstyleId, textarea.value);
+        toastr.success('Описание сохранено');
+        renderHairstyleGrid(target);
+    });
+
+    panel.querySelector('.iig-hair-desc-clear')?.addEventListener('click', () => {
+        textarea.value = '';
+        updateHairstyleItemDescription(textarea.dataset.hairstyleId, '');
+        toastr.info('Описание очищено');
+        renderHairstyleGrid(target);
+    });
+
+    panel.querySelector('.iig-hair-desc-generate')?.addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        const itemId = btn.dataset.hairstyleId;
+        const statusEl = document.getElementById(`iig_hair_desc_status_${target}`);
+
+        btn.classList.add('disabled');
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Генерация...';
+        if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Отправка картинки vision-модели...'; statusEl.style.color = '#aaa'; }
+
+        try {
+            const desc = await generateHairstyleDescription(itemId);
+            textarea.value = desc;
+            updateHairstyleItemDescription(itemId, desc);
+            if (statusEl) { statusEl.textContent = 'Описание сгенерировано!'; statusEl.style.color = '#8f8'; }
+            toastr.success('Описание сгенерировано через AI');
+            renderHairstyleGrid(target);
+        } catch (error) {
+            iigLog('ERROR', 'Failed to generate hairstyle description:', error);
+            if (statusEl) { statusEl.textContent = `Ошибка: ${error.message}`; statusEl.style.color = '#f88'; }
+            toastr.error(`Ошибка: ${error.message}`);
+        } finally {
+            btn.classList.remove('disabled');
+            btn.innerHTML = '<i class="fa-solid fa-robot"></i> Сгенерировать';
+            setTimeout(() => { if (statusEl) statusEl.style.display = 'none'; }, 5000);
+        }
+    });
+}
+
+// ============================================================
 // UI: AVATAR DROPDOWN
 // ============================================================
 
@@ -2212,6 +2482,57 @@ function createSettingsUI() {
                                 <label>Глубина инжекта</label>
                                 <input type="number" id="iig_wardrobe_injection_depth" class="text_pole" value="${settings.wardrobeInjectionDepth || 1}" min="0" max="100" style="width:70px;">
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- ======= SECTION: Hairstyle Char ======= -->
+                    <div class="iig-collapsible" data-section-id="hairstyle_char">
+                        <div class="iig-collapsible-header">
+                            <i class="fa-solid fa-chevron-down iig-collapse-icon"></i>
+                            <span>✂️ Причёски — Персонаж</span>
+                        </div>
+                        <div class="iig-collapsible-content">
+                            <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                                <input type="text" id="iig_hairstyle_char_name" class="text_pole flex1" placeholder="Название причёски...">
+                                <div class="menu_button" id="iig_hairstyle_char_add"><i class="fa-solid fa-plus"></i> Добавить</div>
+                                <input type="file" id="iig_hairstyle_char_file" accept="image/*" style="display:none;">
+                            </div>
+                            <div id="iig_hairstyle_char" style="max-height:400px;overflow-y:auto;"></div>
+                        </div>
+                    </div>
+
+                    <!-- ======= SECTION: Hairstyle User ======= -->
+                    <div class="iig-collapsible" data-section-id="hairstyle_user">
+                        <div class="iig-collapsible-header">
+                            <i class="fa-solid fa-chevron-down iig-collapse-icon"></i>
+                            <span>✂️ Причёски — Юзер</span>
+                        </div>
+                        <div class="iig-collapsible-content">
+                            <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                                <input type="text" id="iig_hairstyle_user_name" class="text_pole flex1" placeholder="Название причёски...">
+                                <div class="menu_button" id="iig_hairstyle_user_add"><i class="fa-solid fa-plus"></i> Добавить</div>
+                                <input type="file" id="iig_hairstyle_user_file" accept="image/*" style="display:none;">
+                            </div>
+                            <div id="iig_hairstyle_user" style="max-height:400px;overflow-y:auto;"></div>
+                        </div>
+                    </div>
+
+                    <!-- ======= SECTION: Hairstyle Send Mode ======= -->
+                    <div class="iig-collapsible" data-section-id="hairstyle_mode">
+                        <div class="iig-collapsible-header">
+                            <i class="fa-solid fa-chevron-down iig-collapse-icon"></i>
+                            <span>✂️ Режим отправки причёсок</span>
+                        </div>
+                        <div class="iig-collapsible-content">
+                            <div class="flex-row">
+                                <label>Режим</label>
+                                <select id="iig_hairstyle_send_mode" class="flex1">
+                                    <option value="both" ${settings.hairstyleSendMode === 'both' ? 'selected' : ''}>Фото + текст</option>
+                                    <option value="text" ${settings.hairstyleSendMode === 'text' ? 'selected' : ''}>Только текст</option>
+                                    <option value="none" ${settings.hairstyleSendMode === 'none' ? 'selected' : ''}>Не отправлять</option>
+                                </select>
+                            </div>
+                            <p class="hint">Как отправлять референсы причёсок: с фото, только текстовое описание, или не отправлять вообще.</p>
                         </div>
                     </div>
 
@@ -2551,10 +2872,43 @@ function bindSettingsEvents() {
 
     document.getElementById('iig_export_logs')?.addEventListener('click', exportLogs);
 
+    // Hairstyle add buttons
+    const bindHairstyleAdd = (target) => {
+        const addBtn = document.getElementById(`iig_hairstyle_${target}_add`);
+        const fileInput = document.getElementById(`iig_hairstyle_${target}_file`);
+        const nameInput = document.getElementById(`iig_hairstyle_${target}_name`);
+        addBtn?.addEventListener('click', () => fileInput?.click());
+        fileInput?.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onloadend = async () => {
+                const resized = await resizeImageBase64(reader.result.split(',')[1], 512);
+                const name = nameInput?.value?.trim() || file.name.replace(/\.[^.]+$/, '') || 'Hairstyle';
+                addHairstyleItem(name, resized, target);
+                if (nameInput) nameInput.value = '';
+                fileInput.value = '';
+                renderHairstyleGrid(target);
+                toastr.success(`Причёска "${name}" добавлена`);
+            };
+            reader.readAsDataURL(file);
+        });
+    };
+    bindHairstyleAdd('char');
+    bindHairstyleAdd('user');
+
+    // Hairstyle send mode
+    document.getElementById('iig_hairstyle_send_mode')?.addEventListener('change', (e) => {
+        settings.hairstyleSendMode = e.target.value;
+        saveSettings();
+    });
+
     // Render dynamic lists
     renderNpcList();
     renderWardrobeGrid('char');
     renderWardrobeGrid('user');
+    renderHairstyleGrid('char');
+    renderHairstyleGrid('user');
 }
 
 // ============================================================

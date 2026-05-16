@@ -328,11 +328,48 @@
 /* ---- WARDROBE GRID ---- */
 
 #iig_wardrobe_char,
-#iig_wardrobe_user {
+#iig_wardrobe_user,
+#iig_hairstyle_char,
+#iig_hairstyle_user {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     margin: 6px 0;
+    max-height: 300px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 4px;
+}
+
+/* Scrollbar for wardrobe/hairstyle grids */
+#iig_wardrobe_char::-webkit-scrollbar,
+#iig_wardrobe_user::-webkit-scrollbar,
+#iig_hairstyle_char::-webkit-scrollbar,
+#iig_hairstyle_user::-webkit-scrollbar {
+    width: 6px;
+}
+
+#iig_wardrobe_char::-webkit-scrollbar-track,
+#iig_wardrobe_user::-webkit-scrollbar-track,
+#iig_hairstyle_char::-webkit-scrollbar-track,
+#iig_hairstyle_user::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 3px;
+}
+
+#iig_wardrobe_char::-webkit-scrollbar-thumb,
+#iig_wardrobe_user::-webkit-scrollbar-thumb,
+#iig_hairstyle_char::-webkit-scrollbar-thumb,
+#iig_hairstyle_user::-webkit-scrollbar-thumb {
+    background: rgba(255, 182, 193, 0.3);
+    border-radius: 3px;
+}
+
+#iig_wardrobe_char::-webkit-scrollbar-thumb:hover,
+#iig_wardrobe_user::-webkit-scrollbar-thumb:hover,
+#iig_hairstyle_char::-webkit-scrollbar-thumb:hover,
+#iig_hairstyle_user::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 182, 193, 0.5);
 }
 
 /* ---- LOADING PLACEHOLDER ---- */
