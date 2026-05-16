@@ -908,11 +908,18 @@ async function generateImageGemini(prompt, style, refData, options = {}) {
     const model = settings.model;
     const baseUrl = settings.endpoint.replace(/\/$/, '');
     const isGoogleApi = baseUrl.includes('googleapis.com');
+    
+    // Check if this is a proxy that expects OpenAI format (closerouter, voidai, etc)
+    const isOpenAIProxy = baseUrl.includes('closerouter') || baseUrl.includes('voidai') || 
+                          baseUrl.includes('openrouter') || !isGoogleApi;
 
-    // For non-Google APIs (like closerouter), use standard OpenAI-compatible path
-    const url = isGoogleApi
-        ? `${baseUrl}/v1beta/models/${model}:generateContent?key=${settings.apiKey}`
-        : `${baseUrl}/v1/chat/completions`;
+    // For OpenAI-compatible proxies, use OpenAI format instead
+    if (isOpenAIProxy) {
+        return await generateImageOpenAI(prompt, style, refData, options);
+    }
+
+    // For real Google API, use Gemini format
+    const url = `${baseUrl}/v1beta/models/${model}:generateContent?key=${settings.apiKey}`;
 
     let aspectRatio = options.aspectRatio || settings.aspectRatio || '1:1';
     if (!VALID_ASPECT_RATIOS.includes(aspectRatio)) aspectRatio = '1:1';
