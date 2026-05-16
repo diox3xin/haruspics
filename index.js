@@ -130,6 +130,21 @@ function getSettings() {
     for (const item of (s.wardrobeItems || [])) {
         if (!Object.hasOwn(item, 'description')) item.description = '';
     }
+        for (const npc of (s.npcReferences || [])) {
+        ensureNpcDefaults(npc);
+
+        // миграция старого одиночного outfit -> новый массив outfits
+        if (npc.outfit && npc.outfits.length === 0) {
+            npc.outfits.push({
+                id: 'npc_outfit_legacy_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8),
+                name: 'Current Outfit',
+                imageData: null,
+                description: npc.outfit,
+                createdAt: Date.now()
+            });
+            npc.activeOutfitId = npc.outfits[0].id;
+        }
+    }
     return s;
 }
 
@@ -511,6 +526,149 @@ async function generateWardrobeDescription(itemId) {
     return description;
 }
 
+function ensureNpcDefaults(npc) {
+    if (!npc) return;
+    if (!Object.hasOwn(npc, 'appearance')) npc.appearance = '';
+    if (!Object.hasOwn(npc, 'outfit')) npc.outfit = '';
+    if (!Array.isArray(npc.outfits)) npc.outfits = [];
+    if (!Object.hasOwn(npc, 'activeOutfitId')) npc.activeOutfitId = null;
+
+    for (const outfit of npc.outfits) {
+        if (!Object.hasOwn(outfit, 'description')) outfit.description = '';
+        if (!Object.hasOwn(outfit, 'imageData')) outfit.imageData = null;
+    }
+}
+
+async function generateVisionDescriptionFromImage(imageData, promptText) {
+    const settings = getSettings();
+    if (!imageData) throw new Error('Нет данных изображения');
+
+    const endpoint = settings.wardrobeDescEndpoint || settings.endpoint;
+    const apiKey = settings.wardrobeDescApiKey || settings.apiKey;
+    const model = settings.wardrobeDescModel;
+
+    if (!endpoint) throw new Error('Не настроен эндпоинт для генерации описаний');
+    if (!apiKey) throw new Error('Не настроен API ключ');
+    if (!model) throw new Error('Не выбрана модель для описаний');
+
+    const response = await fetch(`${endpoint.replace(/\/$/, '')}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            model,
+            max_tokens: 500,
+            temperature: 0.3,
+            messages: [{
+                role: 'user',
+                content: [
+                    { type: 'image_url', image_url: { url: `data:image/png;base64,${imageData}` } },
+                    { type: 'text', text: promptText }
+                ]
+            }],
+        })
+    });
+
+    if (!response.ok) {
+        throw new Error(`API ошибка (${response.status}): ${await response.text().catch(() => '?')}`);
+    }
+
+    const result = await response.json();
+    const description = result.choices?.[0]?.message?.content?.trim();
+    if (!description) throw new Error('Модель вернула пустой ответ');
+    return description;
+}
+
+async function generateNpcAppearanceDescription(npcIndex) {
+    const settings = getSettings();
+    const npc = settings.npcReferences?.[npcIndex];
+    if (!npc?.imageData) throw new Error('Сначала загрузите картинку NPC');
+
+    const promptText = 'Describe this character\'s physical appearance for a roleplay image prompt. Focus on face, hair, eyes, body type, age impression, skin tone, distinctive features, and overall vibe. Mention clothing only briefly if needed, but prioritize physical appearance. Be concise but detailed in 2-4 sentences. Write in English.';
+
+    const description = await generateVisionDescriptionFromImage(npc.imageData, promptText);
+    iigLog('INFO', `Generated NPC appearance for "${npc.name}": ${description.substring(0, 100)}...`);
+    return description;
+}
+
+function addNpcOutfit(npcIndex, name, imageData) {
+    const settings = getSettings();
+    const npc = settings.npcReferences?.[npcIndex];
+    if (!npc) return null;
+
+    ensureNpcDefaults(npc);
+
+    const item = {
+        id: 'npc_outfit_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8),
+        name: name || 'Outfit',
+        imageData,
+        description: '',
+        createdAt: Date.now()
+    };
+
+    npc.outfits.push(item);
+    if (!npc.activeOutfitId) npc.activeOutfitId = item.id;
+    saveSettings();
+    return item;
+}
+
+function getActiveNpcOutfit(npc) {
+    ensureNpcDefaults(npc);
+    return npc.activeOutfitId ? (npc.outfits.find(i => i.id === npc.activeOutfitId) || null) : null;
+}
+
+function setActiveNpcOutfit(npcIndex, outfitId) {
+    const settings = getSettings();
+    const npc = settings.npcReferences?.[npcIndex];
+    if (!npc) return;
+
+    ensureNpcDefaults(npc);
+    npc.activeOutfitId = npc.activeOutfitId === outfitId ? null : outfitId;
+    saveSettings();
+}
+
+function removeNpcOutfit(npcIndex, outfitId) {
+    const settings = getSettings();
+    const npc = settings.npcReferences?.[npcIndex];
+    if (!npc) return;
+
+    ensureNpcDefaults(npc);
+    if (npc.activeOutfitId === outfitId) npc.activeOutfitId = null;
+    npc.outfits = npc.outfits.filter(i => i.id !== outfitId);
+    if (!npc.activeOutfitId && npc.outfits.length > 0) npc.activeOutfitId = npc.outfits[0].id;
+    saveSettings();
+}
+
+function updateNpcOutfitDescription(npcIndex, outfitId, description) {
+    const settings = getSettings();
+    const npc = settings.npcReferences?.[npcIndex];
+    if (!npc) return;
+
+    ensureNpcDefaults(npc);
+    const outfit = npc.outfits.find(i => i.id === outfitId);
+    if (outfit) {
+        outfit.description = description;
+        saveSettings();
+    }
+}
+
+async function generateNpcOutfitDescription(npcIndex, outfitId) {
+    const settings = getSettings();
+    const npc = settings.npcReferences?.[npcIndex];
+    if (!npc) throw new Error('NPC не найден');
+
+    ensureNpcDefaults(npc);
+    const outfit = npc.outfits.find(i => i.id === outfitId);
+    if (!outfit?.imageData) throw new Error('Нет данных изображения');
+
+    const promptText = settings.wardrobeDescPrompt || defaultSettings.wardrobeDescPrompt;
+    const description = await generateVisionDescriptionFromImage(outfit.imageData, promptText);
+
+    iigLog('INFO', `Generated NPC outfit for "${npc.name}" / "${outfit.name}": ${description.substring(0, 100)}...`);
+    return description;
+}
 function updateWardrobeInjection() {
     try {
         const context = SillyTavern.getContext();
@@ -676,6 +834,7 @@ async function collectReferenceImages(prompt) {
     const faceRefs = [];
     const clothingRefs = [];
     const textOnlyClothing = [];
+    const textDirectives = [];
     const warnings = [];
 
     const charName = context.characters?.[context.characterId]?.name || null;
@@ -717,11 +876,14 @@ async function collectReferenceImages(prompt) {
         }
     }
 
-    // NPC faces
+    // NPC faces + appearance + NPC outfits
     if (settings.npcReferences && settings.npcReferences.length > 0) {
         for (const npc of settings.npcReferences) {
-            if (!npc.enabled || !npc.imageData || !npc.name) continue;
-            if (nameAppearsInPrompt(npc.name, prompt)) {
+            ensureNpcDefaults(npc);
+            if (!npc.enabled || !npc.name) continue;
+            if (!nameAppearsInPrompt(npc.name, prompt)) continue;
+
+            if (npc.imageData) {
                 faceRefs.push({
                     data: npc.imageData,
                     mimeType: detectMimeType(npc.imageData),
@@ -729,6 +891,26 @@ async function collectReferenceImages(prompt) {
                     type: 'face'
                 });
                 iigLog('INFO', `Face ref: NPC "${npc.name}" added (${Math.round(npc.imageData.length / 1024)}KB)`);
+            }
+
+            if (npc.appearance) {
+                textDirectives.push(`[CHARACTER APPEARANCE for "${npc.name}"]: ${npc.appearance}`);
+            }
+
+            const activeNpcOutfit = getActiveNpcOutfit(npc);
+            if (activeNpcOutfit?.imageData) {
+                clothingRefs.push({
+                    data: activeNpcOutfit.imageData,
+                    mimeType: detectMimeType(activeNpcOutfit.imageData),
+                    name: npc.name,
+                    outfitName: activeNpcOutfit.name,
+                    description: activeNpcOutfit.description || '',
+                    type: 'clothing'
+                });
+            } else if (activeNpcOutfit?.description) {
+                textDirectives.push(`[CLOTHING INSTRUCTION for "${npc.name}"]: ${npc.name} is wearing: ${activeNpcOutfit.description}`);
+            } else if (npc.outfit) {
+                textDirectives.push(`[CLOTHING INSTRUCTION for "${npc.name}"]: ${npc.name} is wearing: ${npc.outfit}`);
             }
         }
     }
@@ -795,7 +977,7 @@ async function collectReferenceImages(prompt) {
     const imageRefs = [...faceRefs, ...clothingAsImage];
     iigLog('INFO', `Reference collection: ${faceRefs.length} face(s), ${clothingAsImage.length} clothing image(s), ${textOnlyClothing.length} clothing text(s), ${warnings.length} warning(s). Total image refs: ${imageRefs.length}/${MAX_IMAGE_REFS}`);
 
-    return { imageRefs, textOnlyClothing, warnings };
+    return { imageRefs, textOnlyClothing, textDirectives, warnings };
 }
 
 // ============================================================
@@ -806,12 +988,16 @@ async function generateImageOpenAI(prompt, style, refData, options = {}) {
     const settings = getSettings();
     const url = `${settings.endpoint.replace(/\/$/, '')}/v1/images/generations`;
 
-    const { imageRefs = [], textOnlyClothing = [] } = refData;
+    const { imageRefs = [], textOnlyClothing = [], textDirectives = [] } = refData;
 
     // Build enhanced prompt
     const promptParts = [];
 
     if (style) promptParts.push(`[Style: ${style}]`);
+        for (const directive of textDirectives) {
+        promptParts.push(directive);
+    }
+
 
     // Text-only clothing instructions
     for (const c of textOnlyClothing) {
@@ -926,7 +1112,7 @@ async function generateImageGemini(prompt, style, refData, options = {}) {
     let imageSize = options.imageSize || settings.imageSize || '1K';
     if (!VALID_IMAGE_SIZES.includes(imageSize)) imageSize = '1K';
 
-    const { imageRefs = [], textOnlyClothing = [] } = refData;
+    const { imageRefs = [], textOnlyClothing = [], textDirectives = [] } = refData;
 
     // Separate face and clothing refs
     const faceRefs = imageRefs.filter(r => r.type === 'face');
@@ -1000,6 +1186,12 @@ async function generateImageGemini(prompt, style, refData, options = {}) {
     if (textOnlyClothing.length > 0) {
         for (const c of textOnlyClothing) {
             fullPrompt += `[CLOTHING INSTRUCTION for "${c.charName}"]: ${c.charName} is wearing: ${c.description}\n\n`;
+        }
+    }
+    
+    if (textDirectives.length > 0) {
+        for (const directive of textDirectives) {
+            fullPrompt += `${directive}\n\n`;
         }
     }
 
@@ -1746,15 +1938,11 @@ function renderNpcList() {
 
     for (let i = 0; i < settings.npcReferences.length; i++) {
         const npc = settings.npcReferences[i];
-        
-        // Migrate old NPC structure
-        if (!Object.hasOwn(npc, 'appearance')) npc.appearance = '';
-        if (!Object.hasOwn(npc, 'outfit')) npc.outfit = '';
+        ensureNpcDefaults(npc);
 
         const card = document.createElement('div');
         card.style.cssText = 'border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:8px;margin-bottom:8px;background:rgba(0,0,0,0.1);';
 
-        // Header row
         const headerRow = document.createElement('div');
         headerRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:8px;';
 
@@ -1778,7 +1966,6 @@ function renderNpcList() {
             preview.innerHTML = '<i class="fa-solid fa-user" style="color:#5a5252;font-size:16px;"></i>';
         }
 
-        // Click preview to upload
         preview.addEventListener('click', () => {
             const fileInput = document.createElement('input');
             fileInput.type = 'file';
@@ -1833,26 +2020,79 @@ function renderNpcList() {
         headerRow.appendChild(expandBtn);
         headerRow.appendChild(deleteBtn);
 
-        // Details panel (collapsible)
+        const activeNpcOutfit = getActiveNpcOutfit(npc);
+
+        const outfitsHtml = npc.outfits.map(outfit => {
+            const active = outfit.id === npc.activeOutfitId;
+            return `
+                <div class="npc-outfit-card" data-npc-index="${i}" data-outfit-id="${outfit.id}" style="position:relative;width:72px;border:2px solid ${active ? '#ffb6c1' : 'rgba(255,255,255,0.08)'};border-radius:8px;overflow:hidden;cursor:pointer;background:rgba(255,255,255,0.02);">
+                    <div style="width:100%;height:72px;background:rgba(255,255,255,0.03);display:flex;align-items:center;justify-content:center;overflow:hidden;">
+                        ${outfit.imageData
+                            ? `<img src="data:image/png;base64,${outfit.imageData}" style="width:100%;height:100%;object-fit:cover;">`
+                            : `<i class="fa-solid fa-shirt" style="color:#666;"></i>`}
+                    </div>
+                    <div style="padding:4px;font-size:9px;color:#fff;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${outfit.name}</div>
+                </div>
+            `;
+        }).join('');
+
         const detailsPanel = document.createElement('div');
         detailsPanel.style.cssText = 'display:none;padding-top:8px;border-top:1px solid rgba(255,255,255,0.05);';
         detailsPanel.innerHTML = `
             <div style="margin-bottom:8px;">
                 <label style="font-size:11px;color:#9a9292;display:block;margin-bottom:3px;">Описание внешности:</label>
-                <textarea class="text_pole npc-appearance-input" rows="2" style="width:100%;font-size:11px;resize:vertical;" 
-                    placeholder="Опишите внешность NPC (рост, телосложение, черты лица, цвет глаз, волосы и т.д.)..."
+                <textarea class="text_pole npc-appearance-input" rows="3" style="width:100%;font-size:11px;resize:vertical;"
+                    placeholder="Опишите внешность NPC..."
                     data-npc-index="${i}">${npc.appearance || ''}</textarea>
+                <div style="display:flex;gap:6px;margin-top:4px;">
+                    <div class="menu_button npc-appearance-generate" data-npc-index="${i}" style="font-size:11px;">
+                        <i class="fa-solid fa-robot"></i> Сгенерировать
+                    </div>
+                    <div class="menu_button npc-appearance-save" data-npc-index="${i}" style="font-size:11px;">
+                        <i class="fa-solid fa-floppy-disk"></i> Сохранить
+                    </div>
+                </div>
+                <div id="npc_appearance_status_${i}" style="display:none;font-size:10px;margin-top:4px;"></div>
             </div>
-            <div>
-                <label style="font-size:11px;color:#9a9292;display:block;margin-bottom:3px;">Описание наряда:</label>
-                <textarea class="text_pole npc-outfit-input" rows="2" style="width:100%;font-size:11px;resize:vertical;" 
-                    placeholder="Опишите типичный наряд NPC (одежда, аксессуары, обувь и т.д.)..."
-                    data-npc-index="${i}">${npc.outfit || ''}</textarea>
+
+            <div style="margin-bottom:8px;">
+                <label style="font-size:11px;color:#9a9292;display:block;margin-bottom:3px;">Наряды NPC:</label>
+                <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center;">
+                    <input type="text" class="text_pole npc-outfit-name" data-npc-index="${i}" placeholder="Название наряда..." style="flex:1;font-size:11px;">
+                    <div class="menu_button npc-outfit-add" data-npc-index="${i}" style="font-size:11px;">
+                        <i class="fa-solid fa-plus"></i> Добавить
+                    </div>
+                </div>
+                <div class="npc-outfits-grid" style="display:flex;flex-wrap:wrap;gap:8px;max-height:180px;overflow-y:auto;margin-bottom:8px;">
+                    ${outfitsHtml || '<div style="color:#666;font-size:11px;">Нарядов пока нет</div>'}
+                </div>
             </div>
-            <p class="hint" style="margin-top:6px;font-size:10px;">Эти описания будут добавлены в промпт, когда имя NPC появится в сцене.</p>
+
+            ${activeNpcOutfit ? `
+                <div>
+                    <label style="font-size:11px;color:#9a9292;display:block;margin-bottom:3px;">Описание активного наряда: <b>${activeNpcOutfit.name}</b></label>
+                    <textarea class="text_pole npc-outfit-description" rows="3" style="width:100%;font-size:11px;resize:vertical;"
+                        data-npc-index="${i}" data-outfit-id="${activeNpcOutfit.id}"
+                        placeholder="Введите описание наряда вручную или сгенерируйте...">${activeNpcOutfit.description || ''}</textarea>
+                    <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap;">
+                        <div class="menu_button npc-outfit-generate" data-npc-index="${i}" data-outfit-id="${activeNpcOutfit.id}" style="font-size:11px;">
+                            <i class="fa-solid fa-robot"></i> Сгенерировать
+                        </div>
+                        <div class="menu_button npc-outfit-save" data-npc-index="${i}" data-outfit-id="${activeNpcOutfit.id}" style="font-size:11px;">
+                            <i class="fa-solid fa-floppy-disk"></i> Сохранить
+                        </div>
+                        <div class="menu_button npc-outfit-clear" data-npc-index="${i}" data-outfit-id="${activeNpcOutfit.id}" style="font-size:11px;">
+                            <i class="fa-solid fa-eraser"></i>
+                        </div>
+                        <div class="menu_button npc-outfit-delete" data-npc-index="${i}" data-outfit-id="${activeNpcOutfit.id}" style="font-size:11px;color:#cc5555;">
+                            <i class="fa-solid fa-trash"></i>
+                        </div>
+                    </div>
+                    <div id="npc_outfit_status_${i}" style="display:none;font-size:10px;margin-top:4px;"></div>
+                </div>
+            ` : ''}
         `;
 
-        // Toggle expand/collapse
         expandBtn.addEventListener('click', () => {
             const isExpanded = expandBtn.dataset.expanded === 'true';
             expandBtn.dataset.expanded = !isExpanded;
@@ -1861,17 +2101,146 @@ function renderNpcList() {
             expandBtn.querySelector('i').classList.toggle('fa-chevron-up', !isExpanded);
         });
 
-        // Save on blur
         detailsPanel.querySelector('.npc-appearance-input')?.addEventListener('blur', (e) => {
             const idx = parseInt(e.target.dataset.npcIndex);
             settings.npcReferences[idx].appearance = e.target.value;
             saveSettings();
         });
 
-        detailsPanel.querySelector('.npc-outfit-input')?.addEventListener('blur', (e) => {
-            const idx = parseInt(e.target.dataset.npcIndex);
-            settings.npcReferences[idx].outfit = e.target.value;
+        detailsPanel.querySelector('.npc-appearance-save')?.addEventListener('click', () => {
+            const textarea = detailsPanel.querySelector('.npc-appearance-input');
+            settings.npcReferences[i].appearance = textarea.value;
             saveSettings();
+            toastr.success('Описание внешности сохранено');
+        });
+
+        detailsPanel.querySelector('.npc-appearance-generate')?.addEventListener('click', async (e) => {
+            const btn = e.currentTarget;
+            const statusEl = document.getElementById(`npc_appearance_status_${i}`);
+            const textarea = detailsPanel.querySelector('.npc-appearance-input');
+
+            btn.classList.add('disabled');
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Генерация...';
+            if (statusEl) {
+                statusEl.style.display = 'block';
+                statusEl.textContent = 'Анализ изображения NPC...';
+                statusEl.style.color = '#aaa';
+            }
+
+            try {
+                const desc = await generateNpcAppearanceDescription(i);
+                textarea.value = desc;
+                settings.npcReferences[i].appearance = desc;
+                saveSettings();
+                if (statusEl) {
+                    statusEl.textContent = 'Описание внешности сгенерировано!';
+                    statusEl.style.color = '#8f8';
+                }
+                toastr.success('Внешность NPC сгенерирована');
+            } catch (error) {
+                if (statusEl) {
+                    statusEl.textContent = `Ошибка: ${error.message}`;
+                    statusEl.style.color = '#f88';
+                }
+                toastr.error(`Ошибка: ${error.message}`);
+            } finally {
+                btn.classList.remove('disabled');
+                btn.innerHTML = '<i class="fa-solid fa-robot"></i> Сгенерировать';
+                setTimeout(() => { if (statusEl) statusEl.style.display = 'none'; }, 5000);
+            }
+        });
+
+        detailsPanel.querySelector('.npc-outfit-add')?.addEventListener('click', () => {
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = 'image/*';
+            fileInput.addEventListener('change', async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onloadend = async () => {
+                    const resized = await resizeImageBase64(reader.result.split(',')[1], 512);
+                    const nameInput = detailsPanel.querySelector('.npc-outfit-name');
+                    const name = nameInput?.value?.trim() || file.name.replace(/\.[^.]+$/, '') || 'Outfit';
+                    addNpcOutfit(i, name, resized);
+                    renderNpcList();
+                    toastr.success(`Наряд "${name}" добавлен для ${npc.name}`);
+                };
+                reader.readAsDataURL(file);
+            });
+            fileInput.click();
+        });
+
+        detailsPanel.querySelectorAll('.npc-outfit-card').forEach(el => {
+            el.addEventListener('click', () => {
+                setActiveNpcOutfit(i, el.dataset.outfitId);
+                renderNpcList();
+            });
+        });
+
+        detailsPanel.querySelector('.npc-outfit-description')?.addEventListener('blur', (e) => {
+            updateNpcOutfitDescription(i, e.target.dataset.outfitId, e.target.value);
+        });
+
+        detailsPanel.querySelector('.npc-outfit-save')?.addEventListener('click', () => {
+            const textarea = detailsPanel.querySelector('.npc-outfit-description');
+            if (!textarea) return;
+            updateNpcOutfitDescription(i, textarea.dataset.outfitId, textarea.value);
+            toastr.success('Описание наряда сохранено');
+        });
+
+        detailsPanel.querySelector('.npc-outfit-clear')?.addEventListener('click', () => {
+            const textarea = detailsPanel.querySelector('.npc-outfit-description');
+            if (!textarea) return;
+            textarea.value = '';
+            updateNpcOutfitDescription(i, textarea.dataset.outfitId, '');
+            toastr.info('Описание наряда очищено');
+            renderNpcList();
+        });
+
+        detailsPanel.querySelector('.npc-outfit-delete')?.addEventListener('click', () => {
+            const outfitId = detailsPanel.querySelector('.npc-outfit-description')?.dataset.outfitId;
+            if (!outfitId) return;
+            removeNpcOutfit(i, outfitId);
+            renderNpcList();
+            toastr.info('Наряд удалён');
+        });
+
+        detailsPanel.querySelector('.npc-outfit-generate')?.addEventListener('click', async (e) => {
+            const btn = e.currentTarget;
+            const outfitId = btn.dataset.outfitId;
+            const statusEl = document.getElementById(`npc_outfit_status_${i}`);
+            const textarea = detailsPanel.querySelector('.npc-outfit-description');
+
+            btn.classList.add('disabled');
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Генерация...';
+            if (statusEl) {
+                statusEl.style.display = 'block';
+                statusEl.textContent = 'Анализ изображения наряда...';
+                statusEl.style.color = '#aaa';
+            }
+
+            try {
+                const desc = await generateNpcOutfitDescription(i, outfitId);
+                if (textarea) textarea.value = desc;
+                updateNpcOutfitDescription(i, outfitId, desc);
+                if (statusEl) {
+                    statusEl.textContent = 'Описание наряда сгенерировано!';
+                    statusEl.style.color = '#8f8';
+                }
+                toastr.success('Описание наряда NPC сгенерировано');
+                renderNpcList();
+            } catch (error) {
+                if (statusEl) {
+                    statusEl.textContent = `Ошибка: ${error.message}`;
+                    statusEl.style.color = '#f88';
+                }
+                toastr.error(`Ошибка: ${error.message}`);
+            } finally {
+                btn.classList.remove('disabled');
+                btn.innerHTML = '<i class="fa-solid fa-robot"></i> Сгенерировать';
+                setTimeout(() => { if (statusEl) statusEl.style.display = 'none'; }, 5000);
+            }
         });
 
         card.appendChild(headerRow);
@@ -2853,7 +3222,16 @@ function bindSettingsEvents() {
         if (settings.npcReferences.some(n => n.name.toLowerCase() === name.toLowerCase())) {
             toastr.warning(`NPC "${name}" уже существует`); return;
         }
-        settings.npcReferences.push({ name, imageData: null, enabled: true });
+        settings.npcReferences.push({
+            name,
+            imageData: null,
+            enabled: true,
+            appearance: '',
+            outfit: '',
+            outfits: [],
+            activeOutfitId: null
+        });
+
         saveSettings();
         nameInput.value = '';
         renderNpcList();
