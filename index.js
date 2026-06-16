@@ -3416,5 +3416,199 @@ function bindSettingsEvents() {
         await onMessageReceived(messageId);
     });
 
+    // Floating wardrobe button
+    createFloatingWardrobeButton();
+    
     console.log('[IIG] Inline Image Generation v3.0 initialized');
 })();
+
+// ============================================================
+// FLOATING WARDROBE BUTTON
+// ============================================================
+
+let iigFloatingBtn = null;
+let iigWardrobeModal = null;
+let iigCurrentWardrobeTab = 'char';
+
+function createFloatingWardrobeButton() {
+    // Remove existing button if any
+    iigFloatingBtn?.remove();
+    iigWardrobeModal?.remove();
+    
+    // Create floating button
+    iigFloatingBtn = document.createElement('div');
+    iigFloatingBtn.id = 'iig-float-btn';
+    iigFloatingBtn.innerHTML = '<i class="fa-solid fa-shirt"></i>';
+    iigFloatingBtn.title = 'Гардероб';
+    
+    // Update badge with active outfits count
+    updateFloatingButtonBadge();
+    
+    iigFloatingBtn.addEventListener('click', toggleWardrobeModal);
+    document.body.appendChild(iigFloatingBtn);
+    
+    iigLog('INFO', 'Floating wardrobe button created');
+}
+
+function updateFloatingButtonBadge() {
+    if (!iigFloatingBtn) return;
+    
+    const settings = getSettings();
+    let activeCount = 0;
+    
+    // Count active outfits
+    if (settings.activeWardrobeChar) activeCount++;
+    if (settings.activeWardrobeUser) activeCount++;
+    
+    // Remove existing badge
+    const existingBadge = iigFloatingBtn.querySelector('.iig-bar-count');
+    if (existingBadge) existingBadge.remove();
+    
+    // Add badge if there are active outfits
+    if (activeCount > 0) {
+        const badge = document.createElement('span');
+        badge.className = 'iig-bar-count';
+        badge.textContent = activeCount;
+        iigFloatingBtn.appendChild(badge);
+    }
+    
+    // Toggle active state
+    iigFloatingBtn.classList.toggle('iig-float-active', activeCount > 0);
+}
+
+function toggleWardrobeModal() {
+    if (iigWardrobeModal) {
+        closeWardrobeModal();
+        return;
+    }
+    
+    openWardrobeModal();
+}
+
+function openWardrobeModal() {
+    closeWardrobeModal();
+    
+    // Create overlay
+    const overlay = document.createElement('div');
+    overlay.id = 'iig-wardrobe-modal-overlay';
+    
+    // Create modal
+    const modal = document.createElement('div');
+    modal.id = 'iig-wardrobe-modal';
+    
+    modal.innerHTML = `
+        <div class="iig-wardrobe-header">
+            <div class="iig-wardrobe-header-title">
+                <i class="fa-solid fa-shirt"></i>
+                <span>Гардероб</span>
+            </div>
+            <div class="iig-wardrobe-close" title="Закрыть">
+                <i class="fa-solid fa-xmark"></i>
+            </div>
+        </div>
+        <div class="iig-wardrobe-tabs">
+            <div class="iig-wardrobe-tab iig-tab-active" data-tab="char">
+                <i class="fa-solid fa-user"></i> Персонаж
+            </div>
+            <div class="iig-wardrobe-tab" data-tab="user">
+                <i class="fa-solid fa-user-pen"></i> Юзер
+            </div>
+        </div>
+        <div class="iig-wardrobe-content" id="iig-wardrobe-content"></div>
+    `;
+    
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    iigWardrobeModal = overlay;
+    
+    // Event listeners
+    modal.querySelector('.iig-wardrobe-close').addEventListener('click', closeWardrobeModal);
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) closeWardrobeModal();
+    });
+    
+    modal.querySelectorAll('.iig-wardrobe-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            iigCurrentWardrobeTab = tab.dataset.tab;
+            modal.querySelectorAll('.iig-wardrobe-tab').forEach(t => {
+                t.classList.toggle('iig-tab-active', t.dataset.tab === iigCurrentWardrobeTab);
+            });
+            renderQuickWardrobeList();
+        });
+    });
+    
+    // Close on Escape
+    const escHandler = (e) => {
+        if (e.key === 'Escape') {
+            closeWardrobeModal();
+            document.removeEventListener('keydown', escHandler);
+        }
+    };
+    document.addEventListener('keydown', escHandler);
+    
+    // Initial render
+    renderQuickWardrobeList();
+}
+
+function closeWardrobeModal() {
+    iigWardrobeModal?.remove();
+    iigWardrobeModal = null;
+}
+
+function renderQuickWardrobeList() {
+    const content = document.getElementById('iig-wardrobe-content');
+    if (!content) return;
+    
+    const settings = getSettings();
+    const target = iigCurrentWardrobeTab;
+    const items = settings.wardrobeItems?.filter(i => i.target === target) || [];
+    const activeId = target === 'char' ? settings.activeWardrobeChar : settings.activeWardrobeUser;
+    
+    if (items.length === 0) {
+        content.innerHTML = `
+            <div class="iig-no-outfits">
+                <i class="fa-solid fa-shirt"></i>
+                <p>Нет нарядов в гардеробе</p>
+                <small>Добавьте одежду в настройках расширения</small>
+            </div>
+        `;
+        return;
+    }
+    
+    const html = `
+        <div class="iig-quick-outfit-list">
+            ${items.map(item => `
+                <div class="iig-quick-outfit-item ${item.id === activeId ? 'iig-outfit-active' : ''}" data-id="${item.id}">
+                    ${item.imageData 
+                        ? `<img class="iig-quick-outfit-thumb" src="data:image/png;base64,${item.imageData}" alt="${item.name}">`
+                        : `<div class="iig-quick-outfit-thumb" style="display:flex;align-items:center;justify-content:center;">
+                            <i class="fa-solid fa-shirt" style="color:#5a5252;"></i>
+                           </div>`
+                    }
+                    <div class="iig-quick-outfit-info">
+                        <div class="iig-quick-outfit-name">${item.name}</div>
+                        <div class="iig-quick-outfit-desc">${item.description || 'Без описания'}</div>
+                    </div>
+                    ${item.id === activeId ? '<div class="iig-quick-outfit-badge"><i class="fa-solid fa-check"></i></div>' : ''}
+                </div>
+            `).join('')}
+        </div>
+    `;
+    
+    content.innerHTML = html;
+    
+    // Add click handlers
+    content.querySelectorAll('.iig-quick-outfit-item').forEach(itemEl => {
+        itemEl.addEventListener('click', () => {
+            const itemId = itemEl.dataset.id;
+            setActiveWardrobe(itemId, target);
+            updateFloatingButtonBadge();
+            renderQuickWardrobeList();
+            
+            const item = settings.wardrobeItems.find(i => i.id === itemId);
+            if (item) {
+                toastr.success(`Надет: ${item.name}`, 'Гардероб');
+            }
+        });
+    });
+}
