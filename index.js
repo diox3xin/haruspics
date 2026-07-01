@@ -1579,9 +1579,10 @@ async function generateImageWithRetry(prompt, style, onStatusUpdate, options = {
             onStatusUpdate?.(`Генерация${attempt > 0 ? ` (повтор ${attempt}/${settings.maxRetries})` : ''}...`);
             const genOptions = { ...options, signal: timeoutController.signal };
 
-            const useGeminiApi = settings.apiType === 'gemini';
+            const isRouterApi = isRouterEndpoint(settings.endpoint);
+            const useGeminiApi = settings.apiType === 'gemini' && !isRouterApi;
             const useChatApi = settings.apiType === 'openai-chat' ||
-                (settings.apiType === 'openai' && isRouterEndpoint(settings.endpoint));
+                (isRouterApi && (settings.apiType === 'openai' || settings.apiType === 'gemini'));
 
             if (useGeminiApi) {
                 return await generateImageGemini(prompt, style, refData, genOptions);
