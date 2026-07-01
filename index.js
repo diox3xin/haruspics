@@ -79,6 +79,9 @@ const defaultSettings = Object.freeze({
     // ===== NEW: Presets =====
     apiPresets: [],
     activePresetId: null,
+    // ===== NEW: Style Gallery =====
+    styleGalleryItems: [],
+    activeStyleIds: [],
     // ===== NEW: Collapsed sections state =====
     collapsedSections: {},
 });
@@ -150,6 +153,29 @@ function buildGeminiRequestCandidates(baseUrl, model, apiKey) {
     return candidates;
 }
 
+function normalizeOpenAIBaseUrl(endpoint) {
+    return (endpoint || '').trim().replace(/\/+$/, '').replace(/\/v1$/i, '');
+}
+
+function buildOpenAIUrl(endpoint, path) {
+    const cleanPath = String(path || '').replace(/^\/+/, '');
+    return `${normalizeOpenAIBaseUrl(endpoint)}/v1/${cleanPath}`;
+}
+
+function isRouterEndpoint(endpoint) {
+    const lower = (endpoint || '').toLowerCase();
+    return lower.includes('closerouter') || lower.includes('openrouter') || lower.includes('rout.my');
+}
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 // ============================================================
 // SETTINGS
 // ============================================================
@@ -169,6 +195,12 @@ function getSettings() {
     for (const item of (s.wardrobeItems || [])) {
         if (!Object.hasOwn(item, 'description')) item.description = '';
     }
+    if (!Array.isArray(s.styleGalleryItems)) s.styleGalleryItems = [];
+    if (!Array.isArray(s.activeStyleIds)) s.activeStyleIds = [];
+    for (const item of s.styleGalleryItems) {
+        ensureStyleGalleryItemDefaults(item);
+    }
+    s.activeStyleIds = s.activeStyleIds.filter(id => s.styleGalleryItems.some(item => item.id === id));
         for (const npc of (s.npcReferences || [])) {
         ensureNpcDefaults(npc);
 
@@ -199,7 +231,7 @@ function saveSettings() {
 async function fetchModels() {
     const settings = getSettings();
     if (!settings.endpoint || !settings.apiKey) return [];
-    const url = `${settings.endpoint.replace(/\/$/, '')}/v1/models`;
+    const url = buildOpenAIUrl(settings.endpoint, 'models');
     try {
         const response = await fetch(url, {
             method: 'GET',
@@ -207,7 +239,13 @@ async function fetchModels() {
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
-        return (data.data || []).filter(m => isImageModel(m.id)).map(m => m.id);
+        const ids = (data.data || []).map(m => m.id).filter(Boolean);
+        if (settings.apiType === 'openai-chat' || isRouterEndpoint(settings.endpoint)) {
+            const filtered = ids.filter(id => isImageModel(id) || /vision|gemini|imagen|flux|image|draw|paint|gpt-4o/i.test(id));
+            return filtered.length > 0 ? filtered : ids;
+        }
+        const filtered = ids.filter(id => isImageModel(id));
+        return filtered.length > 0 ? filtered : ids;
     } catch (error) {
         toastr.error(`Ошибка загрузки моделей: ${error.message}`, 'Генерация картинок');
         return [];
@@ -234,7 +272,7 @@ async function fetchDescriptionModels() {
     const endpoint = settings.wardrobeDescEndpoint || settings.endpoint;
     const apiKey = settings.wardrobeDescApiKey || settings.apiKey;
     if (!endpoint || !apiKey) return [];
-    const url = `${endpoint.replace(/\/$/, '')}/v1/models`;
+    const url = buildOpenAIUrl(endpoint, 'models');
     try {
         const response = await fetch(url, {
             method: 'GET',
@@ -384,6 +422,74 @@ async function getUserAvatarBase64() {
 }
 
 // ============================================================
+// STYLE GALLERY SYSTEM
+// ============================================================
+
+function ensureStyleGalleryItemDefaults(item) {
+    if (!item) return;
+    if (!item.id) item.id = 'style_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+    if (!Object.hasOwn(item, 'name')) item.name = 'Style';
+    if (!Object.hasOwn(item, 'prompt')) item.prompt = '';
+    if (!Object.hasOwn(item, 'previewData')) item.previewData = null;
+    if (!Object.hasOwn(item, 'createdAt')) item.createdAt = Date.now();
+}
+
+function addStyleGalleryItem(name, promptText, previewData = null) {
+    const settings = getSettings();
+    const item = {
+        id: 'style_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8),
+        name: name || 'Style',
+        prompt: promptText || '',
+        previewData,
+        createdAt: Date.now()
+    };
+    settings.styleGalleryItems.push(item);
+    saveSettings();
+    return item;
+}
+
+function updateStyleGalleryItem(itemId, patch = {}) {
+    const settings = getSettings();
+    const item = settings.styleGalleryItems.find(i => i.id === itemId);
+    if (!item) return null;
+    if (Object.hasOwn(patch, 'name')) item.name = patch.name || 'Style';
+    if (Object.hasOwn(patch, 'prompt')) item.prompt = patch.prompt || '';
+    if (Object.hasOwn(patch, 'previewData')) item.previewData = patch.previewData || null;
+    saveSettings();
+    return item;
+}
+
+function removeStyleGalleryItem(itemId) {
+    const settings = getSettings();
+    settings.styleGalleryItems = settings.styleGalleryItems.filter(i => i.id !== itemId);
+    settings.activeStyleIds = settings.activeStyleIds.filter(id => id !== itemId);
+    saveSettings();
+}
+
+function toggleActiveStyle(itemId) {
+    const settings = getSettings();
+    if (!settings.activeStyleIds.includes(itemId)) settings.activeStyleIds.push(itemId);
+    else settings.activeStyleIds = settings.activeStyleIds.filter(id => id !== itemId);
+    saveSettings();
+}
+
+function getActiveStylePrompts() {
+    const settings = getSettings();
+    return settings.activeStyleIds
+        .map(id => settings.styleGalleryItems.find(item => item.id === id))
+        .filter(item => item?.prompt?.trim())
+        .map(item => item.prompt.trim());
+}
+
+function buildEffectiveStyle(tagStyle = '') {
+    const settings = getSettings();
+    return [settings.defaultStyle, ...getActiveStylePrompts(), tagStyle]
+        .map(part => (part || '').trim())
+        .filter(Boolean)
+        .join(', ');
+}
+
+// ============================================================
 // WARDROBE SYSTEM
 // ============================================================
 
@@ -466,7 +572,7 @@ async function generateHairstyleDescription(itemId) {
 
     const promptText = 'Describe this hairstyle in detail for a character in a roleplay. Focus on: length, color, texture, style (straight/curly/wavy), cut, notable features (bangs, layers, etc), accessories. Be concise but thorough (2-3 sentences). Write in English.';
 
-    const response = await fetch(`${endpoint.replace(/\/$/, '')}/v1/chat/completions`, {
+    const response = await fetch(buildOpenAIUrl(endpoint, 'chat/completions'), {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -539,7 +645,7 @@ async function generateWardrobeDescription(itemId) {
 
     const promptText = settings.wardrobeDescPrompt || defaultSettings.wardrobeDescPrompt;
 
-    const response = await fetch(`${endpoint.replace(/\/$/, '')}/v1/chat/completions`, {
+    const response = await fetch(buildOpenAIUrl(endpoint, 'chat/completions'), {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -590,7 +696,7 @@ async function generateVisionDescriptionFromImage(imageData, promptText) {
     if (!apiKey) throw new Error('Не настроен API ключ');
     if (!model) throw new Error('Не выбрана модель для описаний');
 
-    const response = await fetch(`${endpoint.replace(/\/$/, '')}/v1/chat/completions`, {
+    const response = await fetch(buildOpenAIUrl(endpoint, 'chat/completions'), {
         method: 'POST',
         headers: {
             'Authorization': `Bearer ${apiKey}`,
@@ -1025,7 +1131,7 @@ async function collectReferenceImages(prompt) {
 
 async function generateImageOpenAI(prompt, style, refData, options = {}) {
     const settings = getSettings();
-    const url = `${settings.endpoint.replace(/\/$/, '')}/v1/images/generations`;
+    const url = buildOpenAIUrl(settings.endpoint, 'images/generations');
 
     const { imageRefs = [], textOnlyClothing = [], textDirectives = [] } = refData;
 
@@ -1119,6 +1225,131 @@ async function generateImageOpenAI(prompt, style, refData, options = {}) {
 
     if (urlData) return urlData;
     throw new Error('Unexpected image response format');
+}
+
+function normalizeReturnedImage(value) {
+    if (!value) return null;
+    if (typeof value !== 'string') return null;
+    const clean = value.trim();
+    if (!clean) return null;
+    if (clean.startsWith('data:image/')) return clean;
+    if (/^https?:\/\//i.test(clean)) return clean;
+    if (/^[A-Za-z0-9+/=\r\n]+$/.test(clean) && clean.length > 100) {
+        const compact = clean.replace(/\s+/g, '');
+        let mimeType = 'image/png';
+        if (compact.startsWith('/9j/')) mimeType = 'image/jpeg';
+        else if (compact.startsWith('UklGR')) mimeType = 'image/webp';
+        return `data:${mimeType};base64,${compact}`;
+    }
+    return null;
+}
+
+function extractImageFromText(text) {
+    if (!text || typeof text !== 'string') return null;
+    const dataUrl = text.match(/data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\r\n]+/);
+    if (dataUrl) return normalizeReturnedImage(dataUrl[0]);
+    const markdownImage = text.match(/!\[[^\]]*\]\((https?:\/\/[^\s)]+)\)/i);
+    if (markdownImage) return markdownImage[1];
+    const plainImageUrl = text.match(/https?:\/\/[^\s)"']+\.(?:png|jpe?g|webp|gif)(?:\?[^\s)"']*)?/i);
+    if (plainImageUrl) return plainImageUrl[0];
+    return null;
+}
+
+function parseImageFromApiResponse(result) {
+    const candidates = [];
+    const push = (value) => {
+        if (value == null) return;
+        if (typeof value === 'string') candidates.push(value);
+        else if (typeof value === 'object') {
+            candidates.push(value.url, value.uri, value.b64_json, value.b64, value.base64, value.image);
+            candidates.push(value.image_url?.url, value.image_url);
+            if (value.data) candidates.push(value.data);
+        }
+    };
+
+    push(result?.url);
+    push(result?.uri);
+    push(result?.image);
+    push(result?.b64_json);
+    for (const item of (result?.data || [])) push(item);
+    for (const item of (result?.images || [])) push(item);
+
+    for (const choice of (result?.choices || [])) {
+        const message = choice?.message || choice?.delta || {};
+        push(message.image);
+        push(message.image_url);
+        for (const image of (message.images || [])) push(image);
+        const content = message.content;
+        if (typeof content === 'string') candidates.push(content);
+        else if (Array.isArray(content)) {
+            for (const part of content) {
+                push(part);
+                push(part?.image_url);
+                push(part?.image);
+                if (part?.type === 'text') push(part.text);
+            }
+        }
+    }
+
+    for (const candidate of candidates) {
+        const normalized = normalizeReturnedImage(candidate) || extractImageFromText(candidate);
+        if (normalized) return normalized;
+    }
+    return null;
+}
+
+async function generateImageOpenAIChat(prompt, style, refData, options = {}) {
+    const settings = getSettings();
+    const url = buildOpenAIUrl(settings.endpoint, 'chat/completions');
+    const { imageRefs = [], textOnlyClothing = [], textDirectives = [] } = refData;
+
+    const promptParts = [];
+    promptParts.push('Generate an image from the following instruction. Return the generated image in the response.');
+    if (style) promptParts.push(`[Art Style: ${style}]`);
+    for (const directive of textDirectives) promptParts.push(directive);
+    for (const c of textOnlyClothing) promptParts.push(`[CLOTHING: ${c.charName} is wearing: ${c.description}]`);
+    for (const ref of imageRefs) {
+        if (ref.type === 'face') promptParts.push(`[FACE REFERENCE: ${ref.name}] Copy this character's face and identity as closely as possible.`);
+        if (ref.type === 'clothing') promptParts.push(`[CLOTHING REFERENCE for ${ref.name}: ${ref.description || ref.outfitName || 'copy the outfit only, not the face'}]`);
+    }
+    promptParts.push(`[SCENE TO GENERATE]\n${prompt}`);
+    const fullPrompt = promptParts.join('\n\n');
+
+    const content = [{ type: 'text', text: fullPrompt }];
+    for (const ref of imageRefs) {
+        content.push({
+            type: 'image_url',
+            image_url: { url: `data:${ref.mimeType};base64,${ref.data}` }
+        });
+    }
+
+    const body = {
+        model: settings.model,
+        messages: [{ role: 'user', content }],
+        modalities: ['image', 'text']
+    };
+
+    iigLog('INFO', `OpenAI Chat/Router Request: model=${body.model}, refs=${imageRefs.length}, prompt=${fullPrompt.length} chars`);
+
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${settings.apiKey}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body),
+        signal: options.signal
+    });
+
+    if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw new Error(`API Error (${response.status}): ${text}`);
+    }
+
+    const result = await response.json();
+    const image = parseImageFromApiResponse(result);
+    if (!image) throw new Error('No image data in chat/completions response');
+    return image;
 }
 
 // ============================================================
@@ -1348,11 +1579,16 @@ async function generateImageWithRetry(prompt, style, onStatusUpdate, options = {
             onStatusUpdate?.(`Генерация${attempt > 0 ? ` (повтор ${attempt}/${settings.maxRetries})` : ''}...`);
             const genOptions = { ...options, signal: timeoutController.signal };
 
-            const useGeminiApi = settings.apiType === 'gemini' ||
-                (!['openai', 'gemini'].includes(settings.apiType) && isGeminiModel(settings.model));
+            const useGeminiApi = settings.apiType === 'gemini';
+            const useChatApi = settings.apiType === 'openai-chat' ||
+                (settings.apiType === 'openai' && isRouterEndpoint(settings.endpoint));
 
             if (useGeminiApi) {
                 return await generateImageGemini(prompt, style, refData, genOptions);
+            }
+
+            if (useChatApi) {
+                return await generateImageOpenAIChat(prompt, style, refData, genOptions);
             }
 
             return await generateImageOpenAI(prompt, style, refData, genOptions);
@@ -1648,11 +1884,7 @@ async function processMessageTags(messageId) {
         const tag = tags[index];
         const tagId = `iig-${messageId}-${index}`;
 
-        // Combine default style with tag style
-        let tagStyle = tag.style || '';
-        if (settings.defaultStyle) {
-            tagStyle = settings.defaultStyle + (tagStyle ? ', ' + tagStyle : '');
-        }
+        const tagStyle = buildEffectiveStyle(tag.style);
 
         const loadingPlaceholder = createLoadingPlaceholder(tagId, () => abortController.abort());
 
@@ -1781,10 +2013,7 @@ async function regenerateSingleImage(messageId, tagIndex) {
     const tag = tags[tagIndex];
 
     const settings = getSettings();
-    let tagStyle = tag.style || '';
-    if (settings.defaultStyle) {
-        tagStyle = settings.defaultStyle + (tagStyle ? ', ' + tagStyle : '');
-    }
+    const tagStyle = buildEffectiveStyle(tag.style);
 
     const messageElement = document.querySelector(`#chat .mes[mesid="${messageId}"]`);
     if (!messageElement) return;
@@ -1875,10 +2104,7 @@ async function regenerateMessageImages(messageId) {
         if (abortController.signal.aborted) break;
 
         const tag = tags[index];
-        let tagStyle = tag.style || '';
-        if (settings.defaultStyle) {
-            tagStyle = settings.defaultStyle + (tagStyle ? ', ' + tagStyle : '');
-        }
+        const tagStyle = buildEffectiveStyle(tag.style);
 
         const targetEl = targetPool[index] || null;
         if (!targetEl) { iigLog('WARN', `No matching element for tag ${index}`); continue; }
@@ -2642,6 +2868,100 @@ function renderHairstyleDescriptionPanel(target) {
 // UI: AVATAR DROPDOWN
 // ============================================================
 
+function renderStyleGallery() {
+    const settings = getSettings();
+    const container = document.getElementById('iig_style_gallery_grid');
+    const activeInfo = document.getElementById('iig_style_gallery_active_info');
+    if (!container) return;
+
+    const items = settings.styleGalleryItems || [];
+    const activeIds = settings.activeStyleIds || [];
+    if (activeInfo) {
+        activeInfo.textContent = activeIds.length > 0
+            ? `Активных стилей: ${activeIds.length}`
+            : 'Активные стили не выбраны';
+    }
+
+    if (items.length === 0) {
+        container.innerHTML = '<div class="iig-style-empty">Нет стилей. Добавьте карточку с prompt стиля и, при желании, preview.</div>';
+        return;
+    }
+
+    container.innerHTML = items.map(item => {
+        ensureStyleGalleryItemDefaults(item);
+        const active = activeIds.includes(item.id);
+        return `
+            <div class="iig-style-card ${active ? 'active' : ''}" data-style-id="${escapeHtml(item.id)}" title="Нажмите, чтобы включить/выключить стиль">
+                <div class="iig-style-preview">
+                    ${item.previewData
+                        ? `<img src="data:image/png;base64,${item.previewData}" alt="${escapeHtml(item.name)}">`
+                        : `<div class="iig-style-placeholder"><i class="fa-solid fa-palette"></i></div>`}
+                    ${active ? '<div class="iig-style-check"><i class="fa-solid fa-check"></i></div>' : ''}
+                </div>
+                <div class="iig-style-body">
+                    <div class="iig-style-name">${escapeHtml(item.name || 'Style')}</div>
+                    <div class="iig-style-prompt">${escapeHtml(item.prompt || 'Без prompt')}</div>
+                </div>
+                <div class="iig-style-actions">
+                    <button type="button" class="menu_button iig-style-edit" title="Редактировать"><i class="fa-solid fa-pen"></i></button>
+                    <button type="button" class="menu_button iig-style-preview-replace" title="Заменить preview"><i class="fa-solid fa-image"></i></button>
+                    <button type="button" class="menu_button iig-style-delete" title="Удалить"><i class="fa-solid fa-trash"></i></button>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    container.querySelectorAll('.iig-style-card').forEach(card => {
+        const itemId = card.dataset.styleId;
+        card.addEventListener('click', () => {
+            toggleActiveStyle(itemId);
+            renderStyleGallery();
+        });
+
+        card.querySelector('.iig-style-edit')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const item = getSettings().styleGalleryItems.find(i => i.id === itemId);
+            if (!item) return;
+            const name = prompt('Название стиля:', item.name || 'Style');
+            if (name === null) return;
+            const promptText = prompt('Prompt стиля:', item.prompt || '');
+            if (promptText === null) return;
+            updateStyleGalleryItem(itemId, { name: name.trim() || 'Style', prompt: promptText.trim() });
+            renderStyleGallery();
+            toastr.success('Стиль обновлён', 'Галерея стилей');
+        });
+
+        card.querySelector('.iig-style-preview-replace')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = 'image/*';
+            fileInput.addEventListener('change', async (ev) => {
+                const file = ev.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onloadend = async () => {
+                    const resized = await resizeImageBase64(reader.result.split(',')[1], 512);
+                    updateStyleGalleryItem(itemId, { previewData: resized });
+                    renderStyleGallery();
+                    toastr.success('Preview обновлён', 'Галерея стилей');
+                };
+                reader.readAsDataURL(file);
+            });
+            fileInput.click();
+        });
+
+        card.querySelector('.iig-style-delete')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const item = getSettings().styleGalleryItems.find(i => i.id === itemId);
+            if (!confirm(`Удалить стиль "${item?.name || 'Style'}"?`)) return;
+            removeStyleGalleryItem(itemId);
+            renderStyleGallery();
+            toastr.info('Стиль удалён', 'Галерея стилей');
+        });
+    });
+}
+
 function renderAvatarDropdown(avatars = []) {
     const settings = getSettings();
     const list = document.getElementById('iig_avatar_dropdown_list');
@@ -2783,7 +3103,8 @@ function createSettingsUI() {
                             <div class="flex-row">
                                 <label>Тип API</label>
                                 <select id="iig_api_type" class="flex1">
-                                    <option value="openai" ${settings.apiType === 'openai' ? 'selected' : ''}>OpenAI-совместимый</option>
+                                    <option value="openai" ${settings.apiType === 'openai' ? 'selected' : ''}>OpenAI Images API (/v1/images)</option>
+                                    <option value="openai-chat" ${settings.apiType === 'openai-chat' ? 'selected' : ''}>OpenAI Chat/Router (/v1/chat/completions)</option>
                                     <option value="gemini" ${settings.apiType === 'gemini' ? 'selected' : ''}>Gemini (nano-banana)</option>
                                 </select>
                             </div>
@@ -2857,6 +3178,18 @@ function createSettingsUI() {
                         <div class="iig-collapsible-content">
                             <textarea id="iig_default_style" class="text_pole" rows="3" placeholder="Стиль, добавляемый ко всем генерациям...">${settings.defaultStyle || ''}</textarea>
                             <p class="hint">Этот стиль будет добавлен к каждому промпту автоматически.</p>
+                            <hr>
+                            <div style="display:flex;align-items:center;gap:6px;margin:8px 0;">
+                                <input type="text" id="iig_style_name" class="text_pole" placeholder="Название стиля..." style="flex:1;">
+                                <div class="menu_button" id="iig_style_add"><i class="fa-solid fa-plus"></i> Добавить</div>
+                                <input type="file" id="iig_style_preview_file" accept="image/*" style="display:none;">
+                            </div>
+                            <textarea id="iig_style_prompt" class="text_pole" rows="3" placeholder="Prompt стиля, например: cinematic anime style, soft lighting..."></textarea>
+                            <div style="display:flex;align-items:center;justify-content:space-between;margin:6px 0;gap:8px;">
+                                <span id="iig_style_gallery_active_info" class="hint">Активные стили не выбраны</span>
+                                <div class="menu_button" id="iig_style_clear_active"><i class="fa-solid fa-ban"></i> Снять все</div>
+                            </div>
+                            <div id="iig_style_gallery_grid" class="iig-style-gallery-grid"></div>
                         </div>
                     </div>
 
@@ -3143,6 +3476,25 @@ function bindSettingsEvents() {
 
     document.getElementById('iig_default_style')?.addEventListener('input', (e) => { settings.defaultStyle = e.target.value; saveSettings(); });
 
+    document.getElementById('iig_style_add')?.addEventListener('click', () => {
+        const nameInput = document.getElementById('iig_style_name');
+        const promptInput = document.getElementById('iig_style_prompt');
+        const promptText = promptInput?.value?.trim() || '';
+        if (!promptText) { toastr.warning('Введите prompt стиля', 'Галерея стилей'); return; }
+        const name = nameInput?.value?.trim() || 'Style';
+        addStyleGalleryItem(name, promptText, null);
+        if (nameInput) nameInput.value = '';
+        if (promptInput) promptInput.value = '';
+        renderStyleGallery();
+        toastr.success(`Стиль "${name}" добавлен. Preview можно загрузить кнопкой картинки на карточке.`, 'Галерея стилей');
+    });
+
+    document.getElementById('iig_style_clear_active')?.addEventListener('click', () => {
+        settings.activeStyleIds = [];
+        saveSettings();
+        renderStyleGallery();
+    });
+
     document.getElementById('iig_auto_detect_names')?.addEventListener('change', (e) => { settings.autoDetectNames = e.target.checked; saveSettings(); });
 
     document.getElementById('iig_send_char_avatar')?.addEventListener('change', (e) => { settings.sendCharAvatar = e.target.checked; saveSettings(); });
@@ -3387,6 +3739,7 @@ function bindSettingsEvents() {
     renderWardrobeGrid('user');
     renderHairstyleGrid('char');
     renderHairstyleGrid('user');
+    renderStyleGallery();
 }
 
 // ============================================================
