@@ -117,10 +117,11 @@ function isGeminiModel(modelId) {
 function buildGeminiRequestCandidates(baseUrl, model, apiKey) {
     const clean = baseUrl.replace(/\/$/, '');
     const lower = clean.toLowerCase();
+    const cleanApiKey = normalizeApiKey(apiKey);
 
     if (lower.includes('googleapis.com')) {
         return [{
-            url: `${clean}/v1beta/models/${model}:generateContent?key=${apiKey}`,
+            url: `${clean}/v1beta/models/${model}:generateContent?key=${encodeURIComponent(cleanApiKey)}`,
             headers: { 'Content-Type': 'application/json' }
         }];
     }
@@ -132,7 +133,7 @@ function buildGeminiRequestCandidates(baseUrl, model, apiKey) {
                 url,
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${apiKey}`
+                    'Authorization': `Bearer ${cleanApiKey}`
                 }
             });
         }
@@ -165,6 +166,22 @@ function buildOpenAIUrl(endpoint, path) {
 function isRouterEndpoint(endpoint) {
     const lower = (endpoint || '').toLowerCase();
     return lower.includes('closerouter') || lower.includes('openrouter') || lower.includes('rout.my');
+}
+
+function normalizeApiKey(apiKey) {
+    return String(apiKey ?? '')
+        .trim()
+        .replace(/^['"]|['"]$/g, '')
+        .replace(/^Bearer\s+/i, '')
+        .replace(/\s+/g, '')
+        .trim();
+}
+
+function buildAuthHeaders(apiKey, extra = {}) {
+    return {
+        ...extra,
+        'Authorization': `Bearer ${normalizeApiKey(apiKey)}`
+    };
 }
 
 function escapeHtml(value) {
@@ -235,7 +252,7 @@ async function fetchModels() {
     try {
         const response = await fetch(url, {
             method: 'GET',
-            headers: { 'Authorization': `Bearer ${settings.apiKey}` }
+            headers: buildAuthHeaders(settings.apiKey)
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
@@ -276,7 +293,7 @@ async function fetchDescriptionModels() {
     try {
         const response = await fetch(url, {
             method: 'GET',
-            headers: { 'Authorization': `Bearer ${apiKey}` }
+            headers: buildAuthHeaders(apiKey)
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
@@ -574,7 +591,7 @@ async function generateHairstyleDescription(itemId) {
 
     const response = await fetch(buildOpenAIUrl(endpoint, 'chat/completions'), {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        headers: buildAuthHeaders(apiKey, { 'Content-Type': 'application/json' }),
         body: JSON.stringify({
             model,
             max_tokens: 500,
@@ -647,7 +664,7 @@ async function generateWardrobeDescription(itemId) {
 
     const response = await fetch(buildOpenAIUrl(endpoint, 'chat/completions'), {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        headers: buildAuthHeaders(apiKey, { 'Content-Type': 'application/json' }),
         body: JSON.stringify({
             model,
             max_tokens: 500,
@@ -698,10 +715,7 @@ async function generateVisionDescriptionFromImage(imageData, promptText) {
 
     const response = await fetch(buildOpenAIUrl(endpoint, 'chat/completions'), {
         method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json'
-        },
+        headers: buildAuthHeaders(apiKey, { 'Content-Type': 'application/json' }),
         body: JSON.stringify({
             model,
             max_tokens: 500,
@@ -1188,10 +1202,7 @@ async function generateImageOpenAI(prompt, style, refData, options = {}) {
 
     const response = await fetch(url, {
         method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${settings.apiKey}`,
-            'Content-Type': 'application/json'
-        },
+        headers: buildAuthHeaders(settings.apiKey, { 'Content-Type': 'application/json' }),
         body: JSON.stringify(body),
         signal: options.signal
     });
@@ -1333,10 +1344,7 @@ async function generateImageOpenAIChat(prompt, style, refData, options = {}) {
 
     const response = await fetch(url, {
         method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${settings.apiKey}`,
-            'Content-Type': 'application/json'
-        },
+        headers: buildAuthHeaders(settings.apiKey, { 'Content-Type': 'application/json' }),
         body: JSON.stringify(body),
         signal: options.signal
     });
